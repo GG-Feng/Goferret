@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | 1. 明确仓库结构 | complete | 采用 README + docs + templates + examples 的轻量结构。 |
 | 2. 编写工作流文档 | complete | 输出完整流程、角色、状态、模板和示例。 |
-| 3. 初始化版本库 | in_progress | 创建 Git 历史并提交初版。 |
-| 4. 推送私人仓库 | pending | 使用 GitHub 私有仓库共享给合作者。 |
-| 5. 收尾说明 | pending | 给出仓库地址和后续协作方式。 |
+| 3. 初始化版本库 | complete | 创建 Git 历史并提交初版。 |
+| 4. 推送私人仓库 | complete | 使用 GitHub 私有仓库共享给合作者。 |
+| 5. 收尾说明 | in_progress | 给出仓库地址和后续协作方式。 |
 
 ## 文件结构
 
