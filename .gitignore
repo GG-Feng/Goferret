@@ -1,0 +1,21 @@
+.DS_Store
+Thumbs.db
+
+# Local notes and temporary files
+*.tmp
+*.log
+*.swp
+*.swo
+~$*
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+secrets/
+private/
+
+# Generated exports
+exports/
+dist/
+build/
