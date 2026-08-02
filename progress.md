@@ -9,3 +9,4 @@
 - 检查文档结构与行数，确认仓库内容已具备初版共享条件。
 - 初始化 Git 仓库，创建初始提交 `docs: add reproduction judgement workflow`。
 - 创建并推送 GitHub 私有仓库：`https://github.com/GG-Feng/reproduction-judgement-workflow`。
+- 确认远端仓库为 private，默认分支为 `main`，本地工作区无未提交内容。
