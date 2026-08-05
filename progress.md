@@ -36,3 +36,5 @@
 - 检查旧通用场景词和旧 `code.md` 引用；正式工作流文件已统一使用 `code.txt`。
 - 发现并修复 `.gitignore` 与证据包冲突：普通 `.log` 仍忽略，案例目录下的 `runtime.log` 允许提交。
 - 完成真实 JSON 结构、告警数量、必需 finding 字段、Markdown 标题、README 链接、旧扩展名和差异空白检查。
+- 创建提交 `b7f81ab`：`docs: combine Go vulnerability reproduction and judgement workflow`。
+- 将合并后的工作流推送到 `origin/main`，远端私人仓库已更新。
