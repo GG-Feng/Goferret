@@ -4,6 +4,7 @@ Thumbs.db
 # Local notes and temporary files
 *.tmp
 *.log
+!cases/**/runtime.log
 *.swp
 *.swo
 ~$*
