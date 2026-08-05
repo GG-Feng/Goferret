@@ -7,8 +7,8 @@
 ```text
 report.json
   -> 项目全局信息 project.md
-  -> 每条告警的源码证据 code.txt
-  -> 每条告警的 Docker 证据 runtime.log
+  -> 每条警告的源码证据 code.txt
+  -> 每条警告的 Docker 证据 runtime.log
   -> 项目级判断报告 report.md
 ```
 
@@ -64,14 +64,14 @@ cases/<project>/<scan-id>/
 
 | 路径 | 内容 |
 | --- | --- |
-| [`docs/workflow.md`](docs/workflow.md) | 完整八阶段工作流。 |
+| [`docs/workflow.md`](docs/workflow.md) | 完整阶段工作流。 |
 | [`docs/evidence-standard.md`](docs/evidence-standard.md) | JSON 字段、证据等级、判断矩阵和一致性规则。 |
 | [`docs/collaboration.md`](docs/collaboration.md) | GitHub 协作、复核与敏感材料规范。 |
 | [`examples/example-case.md`](examples/example-case.md) | 脱敏的端到端示例。 |
 
 ## 共同原则
 
-- JSON 告警是候选，不是结论。
+- JSON 警告是候选，不是结论。
 - 读取真实源码，不能只引用扫描器摘录。
 - `code.txt` 同时保留支持证据和缓解/反证。
 - `runtime.log` 保留原始输出，`report.md` 只引用关键片段。
