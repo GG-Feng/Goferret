@@ -1,8 +1,14 @@
-# Go 漏洞复现与判断 Workflow
+# Go 漏洞检测与复现判断 Workflow
 
-这个仓库用于把 Go 漏洞检测工具生成的项目级 JSON 报告，转化为可追溯、可复核的人工判断报告。
+这个仓库包含一条完整流水线的两个阶段：先用检测工具扫描 Go 项目产出警告 JSON，再把 JSON 转化为可追溯、可复核的人工判断报告。
 
-核心流程：
+```text
+Go 项目源码
+  -> [detector/]  扫描  -> report.json
+  -> [本仓库工作流] 复现与判断 -> report.md
+```
+
+判断阶段的内部流程：
 
 ```text
 report.json
@@ -12,7 +18,17 @@ report.json
   -> 项目级判断报告 report.md
 ```
 
-扫描器的 `reasoning`、`evidence`、严重度和置信度都是待验证线索。只有真实源码路径与受控运行结果形成证据闭环，才能给出确认结论。
+两个阶段之间有一道刻意保留的界线：**检测工具的输出是待验证线索，不是结论。** 扫描器的 `reasoning`、`evidence`、严重度和置信度都只用于生成候选和排优先级。只有真实源码路径与受控运行结果形成证据闭环，才能给出确认结论。
+
+## 仓库结构
+
+| 路径 | 阶段 | 内容 |
+| --- | --- | --- |
+| [`detector/`](detector/) | 检测 | Go 漏洞检测工具源码：13 个 stage 的知识库构建与检测流水线。 |
+| `docs/`、`templates/`、`examples/` | 复现判断 | 工作流规范、证据模板和端到端示例。 |
+| `cases/` | 复现判断 | 每次扫描的证据包（不在版本库初始状态中，按需创建）。 |
+
+`detector/` 只包含代码和样例报告。知识库数据（`vuln_db.json`、`enriched_inputs/`、`behavior_chains/`）体积过大且可重新生成，不入库——按 [`detector/CLAUDE.md`](detector/CLAUDE.md) 的 stage 1–11 自行构建。
 
 ## 证据包
 
@@ -39,6 +55,21 @@ cases/<project>/<scan-id>/
 最终 `report.md` 汇总全部选中告警，不替代三类原始证据。
 
 ## 快速开始
+
+### 阶段一：扫描产出 `report.json`
+
+前置条件：Python 依赖（`pip install -r detector/requirements.txt`）、Go 工具链、`detector/.env`（从 [`detector/.env.example`](detector/.env.example) 复制并填入 LLM key）、以及已构建的 `vuln_db.json`。
+
+```bash
+cd detector
+python detect_vulns.py --target /path/to/go-project
+# 或直接从 GitHub 拉取
+python detect_vulns.py --git-url https://github.com/owner/repo --git-ref v1.0.0
+```
+
+结果写入 `detector/projects/<YYYYMMDD_HHMMSS>/report.json`。样例可参考 [`detector/report.json`](detector/report.json)。
+
+### 阶段二：复现与判断
 
 1. 将原始 JSON 放入案例目录并重命名为 `report.json`，不要修改内容。
 2. 使用 [`templates/intake.md`](templates/intake.md) 校验 JSON、记录 SHA-256，并选择告警。
@@ -68,6 +99,8 @@ cases/<project>/<scan-id>/
 | [`docs/evidence-standard.md`](docs/evidence-standard.md) | JSON 字段、证据等级、判断矩阵和一致性规则。 |
 | [`docs/collaboration.md`](docs/collaboration.md) | GitHub 协作、复核与敏感材料规范。 |
 | [`examples/example-case.md`](examples/example-case.md) | 脱敏的端到端示例。 |
+| [`detector/CLAUDE.md`](detector/CLAUDE.md) | 检测工具的 13 个 stage、数据目录布局和架构说明。 |
+| [`detector/reports/`](detector/reports/) | 检测工具的验证报告与原始运行日志。 |
 
 ## 共同原则
 
