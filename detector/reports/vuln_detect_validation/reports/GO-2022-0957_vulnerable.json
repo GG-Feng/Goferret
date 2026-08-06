@@ -1,0 +1,106 @@
+{
+  "scan_info": {
+    "project_id": "20260615_145057",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\InputParsingAndDeserialization\\GO-2022-0957\\vulnerable",
+    "timestamp": "2026-06-15T14:58:14",
+    "model": "GLM-5.1",
+    "total_functions": 5,
+    "analyzed_functions": 3,
+    "total_templates_matched": 15,
+    "total_duration": 436.8
+  },
+  "project_domains": [
+    {
+      "domain": "QueryTemplateAndExpressionConstruction",
+      "confidence": 0.8,
+      "evidence": "包含 Match, deepMatch, IsPattern, Allowable 等典型函数，表明实现了模式匹配或表达式处理逻辑"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.4,
+      "evidence": "依赖 unicode/utf8 标准库，调用 DecodeRuneInString, DecodeLastRune 等函数解析和处理文本字符流"
+    }
+  ],
+  "summary": {
+    "total_findings": 3,
+    "by_severity": {
+      "high": 1,
+      "medium": 2
+    },
+    "by_domain": {
+      "QueryTemplateAndExpressionConstruction": 3
+    },
+    "by_category": {
+      "resource_limit": 2,
+      "error_handling": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_072",
+      "pattern_name": "glob_recursive_backtracking_dos",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-1333",
+        "CWE-400"
+      ],
+      "reasoning": "在 '*' 通配符处理分支中，函数通过两个递归调用 deepMatchRune 实现回溯匹配（一路跳过 '*'，一路消耗 str 的一个字符保留 '*'）。这是经典的指数级回溯模式：对于包含多个 '*' 和字面量交替的 pattern（如 *a*a*a*a*X），当输入字符串不含末尾字面量时，每一步都产生两个分支，总时间复杂度为 O(2^n) 或 O(m^n)。函数中完全没有递归深度限制、超时机制、记忆化（memoization）或 '*' 去重优化。若 pattern 或 str 来源于外部输入，攻击者可以构造恶意 pattern 触发 CPU 耗尽型拒绝服务。此外，递归深度与输入字符串长度成正比，长字符串还可能导致栈溢出。",
+      "evidence": "case '*':\n\t\t\t\treturn deepMatchRune(str, pattern[prsz:]) ||\n\t\t\t\t\t(srsz > 0 && deepMatchRune(str[srsz:], pattern))",
+      "function": "match.go:deepMatchRune"
+    },
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "broken_utf8_error_guard",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-754",
+        "CWE-20"
+      ],
+      "reasoning": "函数在 default 和 '?' 两个分支中使用 `if srsz == utf8.RuneError { return false }` 来检测字符串耗尽或解码错误。但 utf8.RuneError 的值是 rune('\\uFFFD')=65533，而 srsz 是字节大小（取值范围 0-4）。将一个 int 型字节大小与值为 65533 的 rune 常量比较，该条件永远为 false，使得这段错误检查成为死代码。正确的做法应该是检查 `sr == utf8.RuneError`（比较 rune 值）或 `srsz == 0`（比较字节大小判断字符串耗尽）。这导致：(1) '?' 通配符可以匹配空字符串和无效 UTF-8 字节，违反 '匹配恰好一个字符' 的语义；(2) 对无效 UTF-8 输入的错误处理完全失效，可能产生非预期的匹配结果。",
+      "evidence": "if srsz == utf8.RuneError {\n\t\t\t\treturn false\n\t\t\t}",
+      "function": "match.go:deepMatchRune"
+    },
+    {
+      "template_id": "tpl_072",
+      "pattern_name": "recursive_backtrack_dos",
+      "confidence": 0.7,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-1333"
+      ],
+      "reasoning": "在处理通配符 '*' 时，函数使用朴素的递归回溯算法来探索所有可能的字符串匹配方式。当模式中包含多个连续或交错的通配符（如 '*a*b*c'），且目标字符串 str 较长且不完全匹配时，递归调用树会呈指数级膨胀（时间复杂度可达 O(2^n)）。由于缺乏递归深度限制、执行时间限制或结果缓存（动态规划），攻击者可通过构造恶意的模式和字符串引发拒绝服务。",
+      "evidence": "case '*':\n\t\t\treturn deepMatch(str, pattern[1:]) ||\n\t\t\t\t(len(str) > 0 && deepMatch(str[1:], pattern))",
+      "function": "match.go:deepMatch"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "match.go:deepMatchRune",
+      "score": 4,
+      "reasons": [
+        "API match: utf8.DecodeRuneInString",
+        "API match: utf8.DecodeRuneInString"
+      ]
+    },
+    {
+      "function": "match.go:deepMatch",
+      "score": 2,
+      "reasons": [
+        "API match: utf8.DecodeRuneInString"
+      ]
+    },
+    {
+      "function": "match.go:Allowable",
+      "score": 2,
+      "reasons": [
+        "API match: utf8.DecodeLastRune"
+      ]
+    }
+  ]
+}

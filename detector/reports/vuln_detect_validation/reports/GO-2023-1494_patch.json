@@ -1,0 +1,297 @@
+{
+  "scan_info": {
+    "project_id": "20260615_142921",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\QueryTemplateAndExpressionConstruction\\GO-2023-1494\\patch",
+    "timestamp": "2026-06-15T14:38:49",
+    "model": "GLM-5.1",
+    "total_functions": 6,
+    "analyzed_functions": 5,
+    "total_templates_matched": 15,
+    "total_duration": 567.7
+  },
+  "project_domains": [
+    {
+      "domain": "QueryTemplateAndExpressionConstruction",
+      "confidence": 0.95,
+      "evidence": "大量使用 database/sql 的 Query、Exec、QueryRow、Prepare；函数链 QueryDbToArray/QueryDbToMap/ExecDb 均执行数据库操作，且存在 SqlSafe 函数进行 SQL 安全处理（strings.Replace/HasPrefix/ToUpper）"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.75,
+      "evidence": "使用 encoding/json 的 Unmarshal、Marshal、Decode、Encode、NewDecoder 对查询结果进行 JSON 序列化/反序列化；使用 strings 包的 Contains、HasPrefix、Replace、Split 等进行字符串处理与输入检查"
+    }
+  ],
+  "summary": {
+    "total_findings": 15,
+    "by_severity": {
+      "medium": 9,
+      "high": 4,
+      "low": 2
+    },
+    "by_domain": {
+      "QueryTemplateAndExpressionConstruction": 8,
+      "InputParsingAndDeserialization": 7
+    },
+    "by_category": {
+      "error_handling": 7,
+      "resource_limit": 3,
+      "input_sanitization": 3,
+      "output_encoding": 2
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "scan_error_ignored",
+      "confidence": 0.92,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-755"
+      ],
+      "reasoning": "rows.Scan(dest...) 的返回值（error）被完全忽略。rows.Scan 在类型转换失败、列数不匹配或数据库驱动错误时会返回 error。忽略此错误会导致 rawResult 中包含不一致或损坏的数据被静默地转换为字符串并返回给调用者，调用者无法感知数据完整性问题。",
+      "evidence": "rows.Scan(dest...) // 返回值未赋值给任何变量，也未检查",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "columns_error_swallowed",
+      "confidence": 0.88,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-755"
+      ],
+      "reasoning": "rows.Columns() 的返回错误被 '_' 丢弃。如果 rows.Columns() 返回错误（例如连接断开、驱动异常），cols 将为 nil 或空，后续基于 len(cols) 创建的切片长度为 0，dest 为空，导致 Scan 行为异常或 panic。虽然 recover 会捕获 panic，但这属于被动的错误处理而非主动检查。",
+      "evidence": "cols, _ := rows.Columns()",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_041",
+      "pattern_name": "recover_swallows_error",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-209",
+        "CWE-392"
+      ],
+      "reasoning": "defer 中的 recover() 捕获 panic 后仅调用 fmt.Println(err) 打印到标准输出，函数仍然返回 (results, nil)。调用者收到 nil error，误认为查询成功。更严重的是，fmt.Println(err) 将 panic 信息（可能包含数据库连接字符串、SQL 语句、内部路径等敏感信息）直接输出到标准输出，造成敏感信息泄露。",
+      "evidence": "defer func() {\n\t\tif err := recover(); err != nil {\n\t\t\tfmt.Println(err)\n\t\t}\n\t}()",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_result_set",
+      "confidence": 0.82,
+      "severity": "high",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-770"
+      ],
+      "reasoning": "for rows.Next() 循环遍历查询结果的每一行并将所有数据加载到内存中的 results [][]string 切片，没有任何行数限制。如果 SQL 查询返回大量数据（例如数百万行），results 切片会无限增长导致内存耗尽（OOM），造成拒绝服务攻击。函数应限制最大返回行数或使用分页机制。",
+      "evidence": "for rows.Next() {\n    result := make([]string, len(cols))\n    rows.Scan(dest...)\n    // ...\n    results = append(results, result)\n}",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_069",
+      "pattern_name": "sql_blacklist_bypass",
+      "confidence": 0.65,
+      "severity": "high",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-89"
+      ],
+      "reasoning": "SqlSafe 通过 strings.Replace 对 sqlStatement 进行黑名单式字符串替换过滤（从调用链 SqlSafe → strings.Replace 可知）。黑名单过滤方式存在已知缺陷：攻击者可使用大小写变体、注释绕过、编码绕过、嵌套关键字等技术绕过字符串替换。sqlStatement 直接传入 db.Query，如果 sqlStatement 包含用户可控的部分（如动态表名、ORDER BY 字段），可能导致 SQL 注入。参数化查询仅保护 sqlParams，不保护 sqlStatement 本身。",
+      "evidence": "SqlSafe(&sqlStatement)\n// ...\nrows, err := db.Query(sqlStatement, sqlParams...)",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "log_output_unescaped",
+      "confidence": 0.6,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "recover 块中 fmt.Println(err) 直接将 panic 错误信息输出到标准输出，未对输出内容进行编码或转义。如果 panic 消息中包含攻击者可控的数据（如恶意构造的 SQL 语句或参数值中的换行符、控制字符），可能造成日志伪造或日志注入。同时这也是一个信息泄露问题，错误信息可能暴露内部实现细节。",
+      "evidence": "if err := recover(); err != nil {\n    fmt.Println(err)\n}",
+      "function": "gosqljson.go:QueryDbToArray"
+    },
+    {
+      "template_id": "tpl_042",
+      "pattern_name": "inadequate_sql_injection_filter",
+      "confidence": 0.85,
+      "severity": "high",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-89"
+      ],
+      "reasoning": "函数接收原始的 SQL 语句 (sqlStatement)，并通过 SqlSafe 函数进行过滤后直接传递给 db.Query 执行。依赖像 SqlSafe 这样的基于黑名单或正则替换的过滤函数极不安全，通常可以通过编码绕过或特定 payload 绕过。正确的做法应该是严格使用参数化查询或预编译语句，而不是对拼接好的 SQL 语句进行事后过滤。如果调用方将不受信任的外部输入拼接到 sqlStatement 中，将导致严重的 SQL 注入漏洞。",
+      "evidence": "SqlSafe(&sqlStatement)\n...\nrows, err := db.Query(sqlStatement, sqlParams...)",
+      "function": "gosqljson.go:QueryDbToMap"
+    },
+    {
+      "template_id": "tpl_041",
+      "pattern_name": "ignored_scan_error_data_corruption",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-754",
+        "CWE-209"
+      ],
+      "reasoning": "在遍历结果集时，函数完全忽略了 rows.Scan() 返回的错误。rows.Scan 可能因为类型转换失败、数据库连接断开或数据截断等原因报错。忽略该错误会导致程序在发生错误时继续使用部分填充的缓冲区或上一次迭代的残留数据，导致返回错误或损坏的数据给调用方，引发数据完整性问题或非预期行为。同时，获取列名的函数 rows.Columns() 返回的错误也被忽略。",
+      "evidence": "cols, _ := rows.Columns()\n...\nrows.Scan(dest...)",
+      "function": "gosqljson.go:QueryDbToMap"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_result_accumulation",
+      "confidence": 0.8,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400"
+      ],
+      "reasoning": "函数使用 `results = append(results, result)` 在循环中无限期地追加数据库的返回结果。由于没有对查询返回的行数进行任何限制，也没有提供分页或最大行数截断机制，如果数据库中存在海量记录，或者查询语句本身会导致笛卡尔积爆炸，将会导致进程消耗大量内存，最终可能引发 OOM (Out of Memory) 崩溃，造成拒绝服务攻击。",
+      "evidence": "for rows.Next() {\n    result := make(map[string]string, len(cols))\n    ...\n    results = append(results, result)\n}",
+      "function": "gosqljson.go:QueryDbToMap"
+    },
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "unescaped_sql_in_error_message",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-451"
+      ],
+      "reasoning": "当 SQL 语句前缀不匹配时，函数通过 errors.New(fmt.Sprint(\"Invalid SQL:\", sqlStatement)) 将外部传入的 sqlStatement 原样嵌入错误消息中，未对换行符 \\n、回车符 \\r 或其他控制字符进行转义。若调用方将此错误消息写入日志文件，攻击者可通过在 SQL 语句中注入换行符伪造日志条目，实施日志注入攻击以掩盖恶意行为或伪造审计记录。",
+      "evidence": "return 0, errors.New(fmt.Sprint(\"Invalid SQL:\", sqlStatement))",
+      "function": "gosqljson.go:ExecDb"
+    },
+    {
+      "template_id": "tpl_041",
+      "pattern_name": "sensitive_error_to_stdout",
+      "confidence": 0.8,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-209",
+        "CWE-532"
+      ],
+      "reasoning": "函数在两处通过 fmt.Println(err) 将错误信息直接输出到标准输出：一处是 panic 恢复路径，另一处是 db.Exec 执行失败路径。数据库执行错误消息通常包含完整的 SQL 语句、参数值、表名、列名等数据库结构信息甚至连接信息。将这些信息直接打印到标准输出可能导致敏感信息泄露。此外，panic 恢复路径仅打印错误但向调用方返回 (0, nil)，调用方无法感知发生了异常，可能导致后续逻辑基于错误的默认值继续执行。",
+      "evidence": "fmt.Println(err) // 两处：recover 块中以及 db.Exec 错误处理中",
+      "function": "gosqljson.go:ExecDb"
+    },
+    {
+      "template_id": "tpl_069",
+      "pattern_name": "insufficient_sql_validation",
+      "confidence": 0.55,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-89"
+      ],
+      "reasoning": "函数依赖 SqlSafe(&sqlStatement) 对 SQL 语句进行安全处理，但该函数的实现不可见，其有效性无法确认。虽然 db.Exec 使用了参数化查询（sqlParams...），但 sqlStatement 字符串本身直接作为查询模板传递给数据库执行，参数化查询仅保护 sqlParams 不被解释为 SQL 代码，并不保护 sqlStatement 本身。前缀检查（strings.HasPrefix）仅验证语句类型，不验证语句内容。若调用方将用户输入嵌入到 sqlStatement 字符串中而非通过 sqlParams 传递，且 SqlSafe 仅做黑名单过滤，则可能被绕过导致 SQL 注入。",
+      "evidence": "result, err := db.Exec(sqlStatement, sqlParams...)",
+      "function": "gosqljson.go:ExecDb"
+    },
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "swallowed_query_error",
+      "confidence": 0.95,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-755",
+        "CWE-391",
+        "CWE-209"
+      ],
+      "reasoning": "第1行 QueryDbToArray 返回的 err 未被检查，第2行 json.Marshal 的 err 直接用 := 覆盖了前一次 err。如果 QueryDbToArray 因数据库连接失败、SQL 语法错误等返回 (nil, err)，代码不会提前返回，而是继续执行 json.Marshal(nil) 并返回 (\"null\", nil)。这导致：(1) 数据库查询错误被静默吞掉，调用方无法感知失败；(2) 调用方收到空数据但认为操作成功，可能导致下游逻辑基于错误数据做出决策；(3) 如果错误消息中包含敏感信息（如连接字符串中的密码、表结构），错误丢失反而可能掩盖了信息泄露，但更主要的问题是错误处理不当导致数据完整性受损。应在 QueryDbToArray 调用后立即添加 `if err != nil { return \"\", err }`。",
+      "evidence": "data, err := QueryDbToArray(db, toLower, sqlStatement, sqlParams...)  // err 未检查\njsonString, err := json.Marshal(data)  // err 覆盖了上一行的 err，查询错误丢失",
+      "function": "gosqljson.go:QueryDbToArrayJson"
+    },
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "query_error_swallowed",
+      "confidence": 0.95,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-755",
+        "CWE-391"
+      ],
+      "reasoning": "QueryDbToMap 返回的 err 未被检查。代码在第一行获取了 data 和 err，但直接进入下一行 json.Marshal(data)，且第二行用 := 重新赋值覆盖了 err。这意味着：1) 如果 QueryDbToMap 返回错误（如数据库连接失败、SQL语法错误等），该错误被静默丢弃；2) 即使数据库查询失败，代码仍然尝试对可能为 nil 或不完整的 data 执行 json.Marshal；3) 最终返回的 err 可能是 json.Marshal 的错误（如 nil data 的处理结果），而非真正的数据库错误，导致调用方无法正确判断失败原因，可能基于错误的结果做出错误的后续决策。",
+      "evidence": "data, err := QueryDbToMap(db, toLower, sqlStatement, sqlParams...)  // err 未被检查\njsonString, err := json.Marshal(data)  // err 被覆盖，QueryDbToMap 的错误丢失",
+      "function": "gosqljson.go:QueryDbToMapJson"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_query_result",
+      "confidence": 0.55,
+      "severity": "low",
+      "missing_step_category": "resource_limit",
+      "reasoning": "函数接收任意 sqlStatement 并将其传递给 db.Query 执行，对查询返回的数据量没有任何限制。如果 SQL 查询返回大量行（例如缺少 LIMIT 子句的大表扫描），QueryDbToMap 会将所有结果加载到内存中的 slice，再由 json.Marshal 序列化为完整的 JSON 字符串。这可能导致内存耗尽（OOM）。虽然 SQL 语句来自调用方而非直接来自用户，但若上层调用未限制查询范围，此函数缺少任何资源消耗上限的保护机制。",
+      "evidence": "data, err := QueryDbToMap(db, toLower, sqlStatement, sqlParams...)  // 无 LIMIT 或行数上限检查\njsonString, err := json.Marshal(data)  // 将全部数据序列化，无大小限制",
+      "function": "gosqljson.go:QueryDbToMapJson"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "gosqljson.go:QueryDbToArray",
+      "score": 7,
+      "reasons": [
+        "API match: strings.Replace",
+        "API match: strings.ToLower",
+        "uses database/sql"
+      ]
+    },
+    {
+      "function": "gosqljson.go:QueryDbToMap",
+      "score": 7,
+      "reasons": [
+        "API match: strings.Replace",
+        "API match: strings.ToLower",
+        "uses database/sql"
+      ]
+    },
+    {
+      "function": "gosqljson.go:ExecDb",
+      "score": 6,
+      "reasons": [
+        "API match: strings.Replace",
+        "API match: fmt.Sprint",
+        "uses database/sql"
+      ]
+    },
+    {
+      "function": "gosqljson.go:QueryDbToArrayJson",
+      "score": 5,
+      "reasons": [
+        "API match: strings.ToLower",
+        "uses database/sql"
+      ]
+    },
+    {
+      "function": "gosqljson.go:QueryDbToMapJson",
+      "score": 5,
+      "reasons": [
+        "API match: strings.ToLower",
+        "uses database/sql"
+      ]
+    },
+    {
+      "function": "gosqljson.go:SqlSafe",
+      "score": 4,
+      "reasons": [
+        "API match: strings.Replace",
+        "uses database/sql"
+      ]
+    }
+  ]
+}

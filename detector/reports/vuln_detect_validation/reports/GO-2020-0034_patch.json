@@ -1,0 +1,129 @@
+{
+  "scan_info": {
+    "project_id": "20260615_141815",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\ArchiveAndCompressionProcessing\\GO-2020-0034\\patch",
+    "timestamp": "2026-06-15T14:21:01",
+    "model": "GLM-5.1",
+    "total_functions": 3,
+    "analyzed_functions": 2,
+    "total_templates_matched": 22,
+    "total_duration": 165.8
+  },
+  "project_domains": [
+    {
+      "domain": "ArchiveAndCompressionProcessing",
+      "confidence": 0.95,
+      "evidence": "核心功能为解压ZIP文件：使用 archive/zip.OpenReader 读取zip，导入第三方库 go-unzip，调用链 Extract → zip.OpenReader"
+    },
+    {
+      "domain": "PathHandlingAndFilesystemAccess",
+      "confidence": 0.9,
+      "evidence": "大量文件系统操作：os.Open/Create/OpenFile/Rename/Remove/MkdirAll，path/filepath.Join/Clean/Walk/Abs/Rel"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.5,
+      "evidence": "使用 io.ReadFull/ReadAll/Copy/CopyN 读取字节流，strings.Contains/HasPrefix/HasSuffix 进行字符串处理，作为解压过程的辅助I/O操作"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "by_severity": {
+      "high": 1,
+      "medium": 2,
+      "low": 1
+    },
+    "by_domain": {
+      "ArchiveAndCompressionProcessing": 2,
+      "PathHandlingAndFilesystemAccess": 2
+    },
+    "by_category": {
+      "resource_limit": 1,
+      "access_control": 1,
+      "error_handling": 1,
+      "output_encoding": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_005",
+      "pattern_name": "zip_bomb_unbounded_decompression",
+      "confidence": 0.95,
+      "severity": "high",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-409",
+        "CWE-400"
+      ],
+      "reasoning": "函数使用 io.Copy(f, rc) 将 zip 条目的解压内容写入文件，但没有任何大小限制或解压缩比率检查。恶意攻击者可以构造压缩比极高的 zip 炸弹（如几千字节压缩后解压为数十 GB），导致磁盘耗尽或内存耗尽，造成拒绝服务。应在 io.Copy 之前使用 io.LimitReader 或检查 f.UncompressedSize64 限制最大解压大小。",
+      "evidence": "_, err = io.Copy(f, rc)",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_057",
+      "pattern_name": "zip_entry_mode_injection",
+      "confidence": 0.88,
+      "severity": "medium",
+      "missing_step_category": "access_control",
+      "cwe_alignment": [
+        "CWE-732",
+        "CWE-266"
+      ],
+      "reasoning": "os.OpenFile 的权限参数直接来自 zip 条目的 f.Mode()，该值完全由攻击者控制。恶意 zip 文件可将条目权限设为 0777（世界可写）、04777（setuid）等危险权限。如果程序以 root 运行，可导致 setuid root 提权；即使非 root，世界可写文件也可被其他用户篡改。应在创建文件后用固定安全权限（如 0644）或对 f.Mode() 进行掩码过滤。",
+      "evidence": "f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_002",
+      "pattern_name": "mkdirall_error_ignored",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-754"
+      ],
+      "reasoning": "代码中三处 os.MkdirAll 调用均忽略了返回的错误值：(1) os.MkdirAll(uz.Dest, 0755) 创建目标目录时；(2) os.MkdirAll(path, f.Mode()) 创建目录条目时；(3) os.MkdirAll(filepath.Dir(path), f.Mode()) 创建文件父目录时。如果目标目录创建失败（权限不足、磁盘已满等），后续文件写入会产生不明确的错误，可能导致数据丢失或不完整的提取结果，且错误诊断困难。",
+      "evidence": "os.MkdirAll(uz.Dest, 0755)",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_061",
+      "pattern_name": "zip_entry_name_log_injection",
+      "confidence": 0.8,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-93"
+      ],
+      "reasoning": "函数通过 fmt.Println 将 zip 条目名称 f.Name 和源路径 uz.Src 直接拼接到日志输出中，未对换行符、回车符等控制字符进行转义。攻击者可构造包含 \\n\\r 的 zip 条目名，在日志中注入伪造的提取完成消息或其他误导性日志条目，干扰安全审计或日志分析。",
+      "evidence": "fmt.Println(\"Extracting file: \" + f.Name)",
+      "function": "unzip.go:Extract"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "unzip.go:Extract",
+      "score": 21,
+      "reasons": [
+        "has data flow (source+sink)",
+        "API match: r.Close",
+        "API match: os.MkdirAll",
+        "API match: filepath.Join",
+        "API match: strings.HasPrefix",
+        "API match: filepath.Clean",
+        "API match: fmt.Errorf",
+        "API match: os.OpenFile",
+        "API match: io.Copy",
+        "uses archive/zip"
+      ]
+    },
+    {
+      "function": "unzip.go:New",
+      "score": 2,
+      "reasons": [
+        "uses archive/zip"
+      ]
+    }
+  ]
+}

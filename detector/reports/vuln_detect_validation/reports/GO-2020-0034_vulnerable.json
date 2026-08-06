@@ -1,0 +1,139 @@
+{
+  "scan_info": {
+    "project_id": "20260615_141610",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\ArchiveAndCompressionProcessing\\GO-2020-0034\\vulnerable",
+    "timestamp": "2026-06-15T14:18:13",
+    "model": "GLM-5.1",
+    "total_functions": 3,
+    "analyzed_functions": 2,
+    "total_templates_matched": 22,
+    "total_duration": 122.1
+  },
+  "project_domains": [
+    {
+      "domain": "ArchiveAndCompressionProcessing",
+      "confidence": 1.0,
+      "evidence": "导入了 archive/zip，调用了 zip.OpenReader，并使用了第三方解压库 go-unzip"
+    },
+    {
+      "domain": "PathHandlingAndFilesystemAccess",
+      "confidence": 0.9,
+      "evidence": "导入了 os 和 path/filepath，调用了 os.MkdirAll, f.Open 进行文件和目录操作"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.6,
+      "evidence": "导入了 io，并使用了 io.ReadFull, ReadAll 等函数读取数据流"
+    }
+  ],
+  "summary": {
+    "total_findings": 5,
+    "by_severity": {
+      "high": 2,
+      "medium": 1,
+      "low": 2
+    },
+    "by_domain": {
+      "ArchiveAndCompressionProcessing": 3,
+      "PathHandlingAndFilesystemAccess": 2
+    },
+    "by_category": {
+      "path_validation": 1,
+      "resource_limit": 1,
+      "access_control": 1,
+      "error_handling": 1,
+      "output_encoding": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_004",
+      "pattern_name": "zip_slip_path_traversal",
+      "confidence": 0.95,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22"
+      ],
+      "reasoning": "归档条目名 f.Name 直接从 ZIP 头中取出，通过 filepath.Join(uz.Dest, f.Name) 拼接路径后写入文件。filepath.Join 虽然会清理路径分隔符，但不会阻止包含 '…/…/' 的相对路径逃逸。例如 f.Name 为 '…/…/…/etc/cron.d/evil' 时，最终写入路径将逃出 uz.Dest 边界。代码中完全缺失对拼接后路径的规范化检查（如 filepath.Clean 后验证是否仍以 uz.Dest 为前缀），这是一个经典的 Zip Slip 漏洞。",
+      "evidence": "path := filepath.Join(uz.Dest, f.Name)\n...\nif f.FileInfo().IsDir() {\n    os.MkdirAll(path, f.Mode())\n} else {\n    os.MkdirAll(filepath.Dir(path), f.Mode())\n    f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_005",
+      "pattern_name": "compression_bomb_unbounded",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-409"
+      ],
+      "reasoning": "io.Copy(f, rc) 将 ZIP 条目的解压内容直接写入磁盘，没有对解压后的大小施加任何限制。攻击者可以构造 ZIP 炸弹（极高压缩比的归档），使得解压后产生海量数据填满磁盘，导致拒绝服务。缺失的步骤是：在 io.Copy 之前使用 io.LimitReader 限制解压字节数，或在复制过程中检查累计写入大小是否超过阈值。",
+      "evidence": "_, err = io.Copy(f, rc)\nif err != nil {\n    return err\n}",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_057",
+      "pattern_name": "archive_permission_inheritance",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "access_control",
+      "cwe_alignment": [
+        "CWE-732"
+      ],
+      "reasoning": "os.OpenFile 的第三个参数 f.Mode() 直接使用归档条目中存储的文件权限位。攻击者可以在 ZIP 中设置任意权限（如 0777 或 setuid 位），导致提取后的文件权限过度宽松。同理 os.MkdirAll(path, f.Mode()) 和 os.MkdirAll(filepath.Dir(path), f.Mode()) 也直接使用了归档中的权限。缺失步骤是：对 f.Mode() 进行掩码处理，限制最大权限（如 & 0775），或使用固定的安全默认权限。",
+      "evidence": "os.MkdirAll(path, f.Mode())\n...\nos.MkdirAll(filepath.Dir(path), f.Mode())\nf, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_002",
+      "pattern_name": "mkdir_error_ignored",
+      "confidence": 0.85,
+      "severity": "low",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-754"
+      ],
+      "reasoning": "顶层 os.MkdirAll(uz.Dest, 0755) 的返回值被完全忽略。如果目标目录创建失败（权限不足、磁盘满等），函数不会报错而是继续执行后续的文件提取逻辑，可能导致文件被写入到意外位置或产生不完整的提取结果。缺失步骤是检查 err 返回值并在失败时提前返回。",
+      "evidence": "os.MkdirAll(uz.Dest, 0755)",
+      "function": "unzip.go:Extract"
+    },
+    {
+      "template_id": "tpl_061",
+      "pattern_name": "archive_name_log_injection",
+      "confidence": 0.75,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-93"
+      ],
+      "reasoning": "fmt.Println(\"Extracting file: \" + f.Name) 和 fmt.Println(\"Extraction of \" + uz.Src + \" started!\") 将外部数据（归档条目名和源路径）直接拼接到日志输出中，未对换行符、回车符等控制字符进行转义。攻击者可在归档文件名中嵌入 \\n 字符，伪造后续日志条目，干扰日志审计或触发日志注入。",
+      "evidence": "fmt.Println(\"Extracting file: \" + f.Name)\n...\nfmt.Println(\"Extraction of \" + uz.Src + \" started!\")",
+      "function": "unzip.go:Extract"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "unzip.go:Extract",
+      "score": 15,
+      "reasons": [
+        "has data flow (source+sink)",
+        "API match: r.Close",
+        "API match: os.MkdirAll",
+        "API match: filepath.Join",
+        "API match: os.OpenFile",
+        "API match: io.Copy",
+        "uses archive/zip"
+      ]
+    },
+    {
+      "function": "unzip.go:New",
+      "score": 2,
+      "reasons": [
+        "uses archive/zip"
+      ]
+    }
+  ]
+}

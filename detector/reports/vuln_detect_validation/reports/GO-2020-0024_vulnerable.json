@@ -1,0 +1,164 @@
+{
+  "scan_info": {
+    "project_id": "20260615_143852",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\NetworkRequestAndProtocolHandling\\GO-2020-0024\\vulnerable",
+    "timestamp": "2026-06-15T14:44:12",
+    "model": "GLM-5.1",
+    "total_functions": 11,
+    "analyzed_functions": 5,
+    "total_templates_matched": 18,
+    "total_duration": 320.4
+  },
+  "project_domains": [
+    {
+      "domain": "NetworkRequestAndProtocolHandling",
+      "confidence": 0.95,
+      "evidence": "导入并使用了 net 包的网络核心 API（Dial, Listen, Accept, Conn），调用链中包含 net.SplitHostPort, net.Dial 以及底层的连接读写和超时设置"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.7,
+      "evidence": "使用了 io 包的 ReadFull, ReadAll, Copy, CopyN 等信号，且函数调用链中存在大量针对连接的 Read 操作"
+    }
+  ],
+  "summary": {
+    "total_findings": 4,
+    "by_severity": {
+      "medium": 2,
+      "low": 2
+    },
+    "by_domain": {
+      "NetworkRequestAndProtocolHandling": 4
+    },
+    "by_category": {
+      "bounds_check": 1,
+      "input_sanitization": 1,
+      "resource_limit": 1,
+      "output_encoding": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_047",
+      "pattern_name": "unvalidated_domain_length panic",
+      "confidence": 0.88,
+      "severity": "medium",
+      "missing_step_category": "bounds_check",
+      "cwe_alignment": [
+        "CWE-125",
+        "CWE-787",
+        "CWE-120"
+      ],
+      "reasoning": "在解析服务器返回的绑定地址时，当地址类型为 addressTypeDomain，代码从服务器读取 1 字节作为 domainLen，然后直接使用 buf[:domainLen] 进行后续读取。domainLen 由远程服务器控制，范围为 0-255。而 buf 的底层容量为 32+len(host)+len(p.Username)+len(p.Password)，在常见场景下（如 host=\"example.com\", 无认证）远小于 255。恶意或被入侵的代理服务器可以返回 domainLen=255 触发 slice 越界 panic，导致客户端崩溃（DoS）。",
+      "evidence": "case addressTypeDomain:\n\t\tif _, err := io.ReadFull(conn, buf[:1]); err != nil {\n\t\t\tconn.Close()\n\t\t\treturn nil, err\n\t\t}\n\t\tdomainLen := buf[0]  // 未检查 domainLen 是否 <= cap(buf)\n\t\tif _, err := io.ReadFull(conn, buf[:domainLen]); err != nil {  // 可能 panic",
+      "function": "dial.go:Dial"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "socks5_length_field_overflow",
+      "confidence": 0.82,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-190",
+        "CWE-20"
+      ],
+      "reasoning": "SOCKS5 协议使用单字节（0-255）表示域名、用户名和密码的长度。代码使用 byte(len(host))、byte(len(p.Username)) 和 byte(len(p.Password)) 进行类型转换，但没有预先检查长度是否超过 255。当 len(host)、len(p.Username) 或 len(p.Password) 超过 255 时，byte() 转换会发生静默截断（整数溢出），导致写入协议消息的长度字段与实际数据长度不匹配。这会造成协议消息畸形，可能导致代理服务器解析错误或认证凭据被截断（认证绕过）。host 来源于 addr 参数，最终来自外部网络请求，可以被攻击者控制。",
+      "evidence": "buf[4] = byte(len(host))   // 若 len(host) > 255 则溢出截断\nbuf[1] = byte(len(p.Username))   // 若 len(p.Username) > 255 则溢出截断\nbuf[2+len(p.Username)] = byte(len(p.Password))   // 若 len(p.Password) > 255 则溢出截断",
+      "function": "dial.go:Dial"
+    },
+    {
+      "template_id": "tpl_055",
+      "pattern_name": "missing_io_timeout",
+      "confidence": 0.75,
+      "severity": "low",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-770"
+      ],
+      "reasoning": "函数建立 TCP 连接后进行多次读写操作（conn.Write、io.ReadFull），但从未调用 conn.SetDeadline 或 conn.SetReadDeadline 设置超时。如果代理服务器是无响应的恶意服务器或网络出现拥塞，io.ReadFull 将无限期阻塞，导致连接资源泄漏和潜在的 goroutine 泄漏。在代理场景下，攻击者可以构造慢速代理服务器实施 DoS 攻击。",
+      "evidence": "conn, err := net.Dial(\"tcp\", p.Addr)  // 未设置 deadline\n// 后续多处 io.ReadFull 和 conn.Write 均无超时保护:\n// if _, err := io.ReadFull(conn, buf[:2]); err != nil {\n// if _, err := io.ReadFull(conn, buf[:4]); err != nil {\n// ... 多处类似调用",
+      "function": "dial.go:Dial"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "unescaped_host_format",
+      "confidence": 0.6,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "该函数作为 String() 方法，通常用于日志记录或输出。host 字段直接嵌入到格式化字符串中，没有进行任何换行符或控制字符的转义处理。如果 host 字段来自不可信的外部输入，攻击者可以注入换行符等控制字符，在字符串被写入日志时可能导致日志伪造（Log Injection / CRLF Injection）。",
+      "evidence": "fmt.Sprintf(\"%s:%d\", a.host, a.port)",
+      "function": "addr.go:String"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "dial.go:Dial",
+      "score": 27,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: strconv.Atoi",
+        "API match: net.Dial",
+        "API match: conn.Write",
+        "API match: Write",
+        "API match: Close",
+        "API match: io.ReadFull",
+        "API match: String",
+        "API match: fmt.Sprintf"
+      ]
+    },
+    {
+      "function": "conn.go:Write",
+      "score": 16,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: Write",
+        "API match: Write",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "addr.go:String",
+      "score": 13,
+      "reasons": [
+        "dangerous sink: string_format",
+        "API match: fmt.Sprintf"
+      ]
+    },
+    {
+      "function": "conn.go:Read",
+      "score": 6,
+      "reasons": [
+        "API match: Read",
+        "API match: Read",
+        "name suggests: read"
+      ]
+    },
+    {
+      "function": "conn.go:Close",
+      "score": 4,
+      "reasons": [
+        "API match: Close",
+        "API match: Close"
+      ]
+    },
+    {
+      "function": "conn.go:SetReadDeadline",
+      "score": 1,
+      "reasons": [
+        "name suggests: read"
+      ]
+    },
+    {
+      "function": "conn.go:SetWriteDeadline",
+      "score": 1,
+      "reasons": [
+        "name suggests: write"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,919 @@
+{
+  "scan_info": {
+    "target": "D:\\Projects\\go_vuln_detect\\vuln_data\\GO-2020-0001\\vulnerable",
+    "timestamp": "2026-05-06T00:44:22",
+    "model": "GLM-5.1",
+    "total_functions": 248,
+    "analyzed_functions": 222,
+    "total_templates_matched": 49,
+    "total_duration": 9399.3
+  },
+  "project_domains": [
+    {
+      "domain": "NetworkRequestAndProtocolHandling",
+      "confidence": 0.95,
+      "evidence": "导入并使用了 net/http, net/url, net 库，包含 Get, Post, ListenAndServe, HandleFunc 等核心网络请求与服务端处理API"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.9,
+      "evidence": "使用了 encoding/xml, bufio, mime/multipart, strings, io 等库进行外部数据、字节流和字符串的解析与反序列化处理"
+    },
+    {
+      "domain": "PathHandlingAndFilesystemAccess",
+      "confidence": 0.9,
+      "evidence": "使用了 os, path/filepath, io/ioutil 库的 Open, Create, ReadFile, WriteFile 等API进行路径处理与文件系统交互"
+    },
+    {
+      "domain": "AuthenticationAndAuthorization",
+      "confidence": 0.85,
+      "evidence": "包含 BasicAuth, BasicAuthForRealm, authorizationHeader, searchCredential 等函数调用链，实现了HTTP Basic身份验证逻辑"
+    },
+    {
+      "domain": "ConcurrencyStateAndSharedResourceManagement",
+      "confidence": 0.85,
+      "evidence": "使用了 sync 包的 Mutex, RWMutex, WaitGroup, Once 等核心并发控制原语"
+    },
+    {
+      "domain": "QueryTemplateAndExpressionConstruction",
+      "confidence": 0.8,
+      "evidence": "使用了 html/template 进行模板解析和渲染，使用 regexp 进行正则表达式匹配与构造"
+    }
+  ],
+  "summary": {
+    "total_findings": 35,
+    "by_severity": {
+      "medium": 22,
+      "high": 9,
+      "low": 4
+    },
+    "by_domain": {
+      "QueryTemplateAndExpressionConstruction": 6,
+      "PathHandlingAndFilesystemAccess": 8,
+      "NetworkRequestAndProtocolHandling": 12,
+      "AuthenticationAndAuthorization": 2,
+      "InputParsingAndDeserialization": 7
+    },
+    "by_category": {
+      "output_encoding": 12,
+      "path_validation": 7,
+      "access_control": 1,
+      "origin_validation": 1,
+      "input_sanitization": 3,
+      "bounds_check": 2,
+      "error_handling": 3,
+      "resource_limit": 5,
+      "cryptographic_verification": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "http_header_injection",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-113"
+      ],
+      "reasoning": "参数 filename 在被嵌入到 HTTP 头部 'Content-Disposition' 之前未经过任何转义或输出编码。如果 filename 包含双引号(\")等特殊字符，攻击者可以截断当前的 filename 属性或注入额外的 HTTP 头部指令。此外，若包含回车换行符(CRLF)，在 Go 标准库中会触发 panic 导致拒绝服务，或在特定的代理服务器中被错误解析引发 HTTP 响应拆分。",
+      "evidence": "c.Writer.Header().Set(\"content-disposition\", fmt.Sprintf(\"attachment; filename=\\\"%s\\\"\", filename))",
+      "function": "context.go:FileAttachment"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "path_traversal",
+      "confidence": 0.8,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22"
+      ],
+      "reasoning": "参数 filepath 被直接传递给 http.ServeFile 用于读取并发送文件。在此数据流中，缺少对 filepath 的安全校验（如路径清洗、边界检查或前缀匹配）。如果 filepath 来自不受信任的外部输入，攻击者可通过提供绝对路径（如 '/etc/passwd'）或包含目录遍历序列（如 '../../../sensitive'）的路径，导致服务器读取并返回预期目录之外的敏感文件。",
+      "evidence": "http.ServeFile(c.Writer, c.Request, filepath)",
+      "function": "context.go:FileAttachment"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "log_injection_via_unescaped_panic",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "在 panic 恢复流程中，代码将包含外部不可信数据的 err 接口和原始 HTTP 请求信息直接格式化并写入日志（如 logger.Printf(\"%s\\n%s%s\", err, ...)）。由于缺乏对输出数据的编码或转义处理，如果应用因为恶意构造的输入（例如包含换行符 \\n 或回车符 \\r 的路径或参数）触发 panic，攻击者可以利用这一点在服务器日志中注入任意伪造的日志条目，从而掩盖攻击痕迹或误导系统管理员。",
+      "evidence": "logger.Printf(\"[Recovery] %s panic recovered:\\n%s\\n%s\\n%s%s\", timeFormat(time.Now()), strings.Join(headers, \"\\r\\n\"), err, stack, reset) 以及 logger.Printf(\"%s\\n%s%s\", err, string(httpRequest), reset)，其中 err 为 recover() 的返回值，未经转义直接输出。",
+      "function": "recovery.go:RecoveryWithWriter"
+    },
+    {
+      "template_id": "tpl_057",
+      "pattern_name": "unix_socket_permission_overopen",
+      "confidence": 0.92,
+      "severity": "high",
+      "missing_step_category": "access_control",
+      "cwe_alignment": [
+        "CWE-732",
+        "CWE-276"
+      ],
+      "reasoning": "函数在创建 Unix socket 后调用 os.Chmod(file, 0777) 将权限设置为全开放（owner/group/other 均为 rwx）。这意味着系统上的任何本地用户都可以连接、读写该 Unix socket，从而与监听的服务进行未经授权的通信。在多用户环境中，这直接绕过了基于 socket 文件权限的访问隔离，允许非特权用户访问本应仅限特权用户使用的服务。应在创建 socket 后设置最小必要权限（如 0600 或 0660），而非 0777。",
+      "evidence": "第10行：err = os.Chmod(file, 0777) — 硬编码权限掩码 0777 将 socket 文件对所有用户完全开放，缺少基于最小权限原则的 access_control 检查。",
+      "function": "gin.go:RunUnix"
+    },
+    {
+      "template_id": "tpl_053",
+      "pattern_name": "unix_socket_path_injection",
+      "confidence": 0.55,
+      "severity": "medium",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-73"
+      ],
+      "reasoning": "file 参数直接传入 os.Remove() 和 net.Listen()，未经任何路径清洗或规范化处理。若 file 来源于外部配置或用户输入，攻击者可能通过注入路径遍历序列（如 ../../../etc/somefile）来删除任意文件或在任意位置创建 socket。此外，os.Remove(file) 与 net.Listen(\"unix\", file) 之间存在 TOCTOU 时间窗口，攻击者可在删除后、监听前创建符号链接指向敏感路径。虽然作为框架函数 file 通常由开发者传入，但缺少 path_validation 仍是潜在风险。",
+      "evidence": "第6行 os.Remove(file) 和第7行 net.Listen(\"unix\", file) — file 参数未经 path.Clean() 清洗或安全路径校验即用于文件系统操作。",
+      "function": "gin.go:RunUnix"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "log_injection_unescaped_input",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-93"
+      ],
+      "reasoning": "函数将外部可控数据（param.Path、param.ClientIP、param.ErrorMessage）直接通过fmt.Sprintf拼接到日志字符串中，未经任何输出编码或特殊字符转义。攻击者可以通过在HTTP请求路径中注入换行符(\\n)或回车符(\\r)来伪造日志条目，实现日志注入攻击。例如发送包含伪造内容的请求路径，可以在日志中插入任意虚假的访问记录，干扰安全审计和日志分析。",
+      "evidence": "fmt.Sprintf(\"[GIN] %v |%s %3d %s| %13v | %15s |%s %-7s %s %s\\n%s\", ..., param.ClientIP, ..., param.Method, ..., param.Path, param.ErrorMessage) 中，param.Path、param.ClientIP、param.ErrorMessage 未经任何转义直接嵌入格式化字符串",
+      "function": "logger.go:defaultLogFormatter"
+    },
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "log_injection_missing_encoding",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-93"
+      ],
+      "reasoning": "该函数作为 HTTP 中间件，直接提取用户可控的请求数据（URL Path、RawQuery、ClientIP、ErrorMessage 等）并组合成 LogFormatterParams。随后通过 fmt.Fprint(out, formatter(param)) 写入日志输出流。在此过程中，未对外部输入中的换行符（\\r, \\n）或其他控制字符进行任何转义或过滤。攻击者可以通过构造恶意的 URL 或注入恶意头部导致伪造日志条目，从而掩盖攻击痕迹或破坏日志系统（日志注入/HTTP 响应拆分相关变种）。",
+      "evidence": "path := c.Request.URL.Path 和 raw := c.Request.URL.RawQuery 被直接拼接为 param.Path = path + \"?\" + raw，并连同 param.ClientIP、param.ErrorMessage 等传入 fmt.Fprint(out, formatter(param))，缺乏针对换行符和控制字符的 output_encoding 逻辑。",
+      "function": "logger.go:LoggerWithConfig"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "unvalidated_filesystem_path",
+      "confidence": 0.85,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22"
+      ],
+      "reasoning": "函数从 HTTP 请求参数中提取文件路径（file := c.Param(\"filepath\")），并直接将其传递给 fs.Open(file) 进行文件系统操作，期间没有进行任何路径遍历校验（如过滤 '../' 或对路径进行规范化清理）。尽管标准库的 http.Dir 可能自带一定的清理机制，但该函数接收的是一个 http.FileSystem 接口，这意味着如果开发者传入了未自行实现安全检查的自定义 FileSystem 实现，攻击者就可以利用未经验证的路径参数读取任意文件。",
+      "evidence": "file := c.Param(\"filepath\")\n\t\t// Check if file exists and/or if we have permission to access it\n\t\tf, err := fs.Open(file)",
+      "function": "routergroup.go:createStaticHandler"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "unvalidated_path_traversal",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-73"
+      ],
+      "reasoning": "函数在将外部传入的 'dst' 参数传递给 os.Create 之前，没有执行任何路径验证（如检查目录穿越序列 '../' 或确保绝对路径在限制的目录范围内）。如果调用者将用户控制的输入（如原始文件名）直接或拼接到 'dst' 中传递给此函数，攻击者就可以利用此漏洞将任意文件写入服务器上的任意位置，从而可能导致拒绝服务或远程代码执行。",
+      "evidence": "在步骤 3 中，代码行 out, err := os.Create(dst) 直接使用了参数 'dst'，而函数内没有任何针对该路径的安全清理或合法性校验逻辑。",
+      "function": "context.go:SaveUploadedFile"
+    },
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "log_injection_via_request_url",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "函数提取了请求的路径 和完整 URL (rURL)，这些数据完全由客户端控制。随后，函数将这些未经任何净化或转义的外部数据直接传递给 debugPrint 写入日志。攻击者可以通过在请求路径中注入 URL 编码的换行符（如 %0a 或 %0d），在服务器日志中伪造恶意的日志条目，从而干扰安全监控、掩盖真实的攻击轨迹或插入虚假的审计事件。",
+      "evidence": "源码中的第3-4行：'rPath := req.URL.Path' 和 'rURL := req.URL.String()' 提取了外部数据；随后在第9行：'debugPrint(\"redirecting request %d: %s --> %s\", code, rPath, rURL)' 将其直接拼接并输出到日志，中间缺失了对换行符等控制字符的 output_encoding 处理。",
+      "function": "gin.go:redirectRequest"
+    },
+    {
+      "template_id": "tpl_051",
+      "pattern_name": "trusted_header_ip_spoofing",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "origin_validation",
+      "cwe_alignment": [
+        "CWE-290",
+        "CWE-346"
+      ],
+      "reasoning": "当 ForwardedByClientIP 启用时，函数直接信任并提取 X-Forwarded-For 和 X-Real-Ip 头的值。它没有验证直接连接的远端地址 (c.Request.RemoteAddr) 是否属于合法的反向代理服务器。攻击者可以直接连接服务器并伪造这些 HTTP 头，从而冒充任意 IP 地址。如果上层业务依赖此返回值进行基于 IP 的访问控制、频率限制或安全审计，则会被轻易绕过。",
+      "evidence": "clientIP := c.requestHeader(\"X-Forwarded-For\")\nclientIP = strings.TrimSpace(strings.Split(clientIP, \",\")[0])",
+      "function": "context.go:ClientIP"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "malformed_ip_injection",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-20"
+      ],
+      "reasoning": "函数从请求头中提取出字符串后，仅进行了去除空格和分割操作，但没有验证提取出的字符串是否真的是一个合法的 IP 地址（例如使用 net.ParseIP 进行校验）。这允许攻击者将包含恶意字符、换行符或 Payload 的字符串作为 'Client IP' 传递给下游调用者。如果下游组件将该字符串未加转义地写入日志或拼接进 SQL/命令中，可能引发日志注入、SSRF 等二次漏洞。",
+      "evidence": "clientIP = strings.TrimSpace(strings.Split(clientIP, \",\")[0])",
+      "function": "context.go:ClientIP"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "path_traversal_via_serve_file",
+      "confidence": 0.85,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22"
+      ],
+      "reasoning": "函数将外部传入的 filepath 参数直接赋值给 c.Request.URL.Path，并传递给 http.FileServer 进行处理。在此过程中，完全没有对 filepath 进行路径规范化（如 path.Clean）或路径遍历字符（如 ../）的安全检查。如果 filepath 参数受用户控制或被污染，攻击者可以通过构造恶意路径读取文件系统上的任意文件。",
+      "evidence": "代码行 c.Request.URL.Path = filepath 将外部参数直接赋给请求路径，随后代码行 http.FileServer(fs).ServeHTTP(c.Writer, c.Request) 使用了该未经验证的路径，中间缺少任何 path_validation 安全步骤。",
+      "function": "context.go:FileFromFS"
+    },
+    {
+      "template_id": "tpl_015",
+      "pattern_name": "unvalidated_header_path_redirect",
+      "confidence": 0.78,
+      "severity": "medium",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-601",
+        "CWE-444"
+      ],
+      "reasoning": "函数从客户端可控的 X-Forwarded-Prefix 请求头读取前缀，仅通过 path.Clean 做了基本的词法清洗（合并多余 '/'、处理 '..'），但未对清洗后的结果做进一步路径有效性校验。path.Clean 对 '..' 的处理仅做相对路径归约，其返回值 '..'、'../evil' 等均不等于 '.'，会通过条件检查并拼接到重定向路径中。攻击者可伪造此头部，将重定向目标篡改为同源下的任意路径（如 X-Forwarded-Prefix: ../evil → p 变为 ../evil/原始路径），构成开放重定向或非预期路径重定向。漏洞利用的前提是应用未在反向代理后面或代理不覆盖该头部。",
+      "evidence": "第 4 行：path.Clean(c.Request.Header.Get(\"X-Forwarded-Prefix\")) 仅做词法清洗，未校验结果是否为合法的应用内路径前缀；第 5 行：p = prefix + \"/\" + req.URL.Path 直接拼接，允许攻击者通过伪造头部控制重定向目标的路径前缀。",
+      "function": "gin.go:redirectTrailingSlash"
+    },
+    {
+      "template_id": "tpl_008",
+      "pattern_name": "mime_type_comparison_panic",
+      "confidence": 0.95,
+      "severity": "high",
+      "missing_step_category": "bounds_check",
+      "cwe_alignment": [
+        "CWE-129",
+        "CWE-787",
+        "CWE-400"
+      ],
+      "reasoning": "在 NegotiateFormat 函数中，字符匹配循环的退出条件仅为 i < len(accepted)。循环内部在未检查 i 是否小于 len(offer) 的情况下，直接访问了 offer[i]。如果攻击者通过 HTTP 请求头传入一个较长的 MIME 类型（例如，比 offer 长，且以 offer 内容为前缀，如 offer 是 text/plain，而 accepted 是 text/plain_extra），当 i 达到 len(offer) 时，访问 offer[i] 将导致 index out of range panic，进而引发服务崩溃（拒绝服务）。",
+      "evidence": "在 'for ; i < len(accepted); i++ { if accepted[i] == '*' || offer[i] == '*' { ... }' 这段代码中，未对索引 i 加以 len(offer) 的界限限制，由于 accepted 可由用户请求头控制，在 len(accepted) > len(offer) 且前缀匹配时会发生越界。",
+      "function": "context.go:NegotiateFormat"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "cookie_crlf_injection",
+      "confidence": 0.8,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-113"
+      ],
+      "reasoning": "函数在构造 HTTP 响应头设置 Cookie 时，仅对 value 参数进行了 url.QueryEscape 编码，而 name、path 和 domain 参数未经过任何输出编码或输入清洗就直接传递给了 http.SetCookie。如果这些参数来源于外部可控输入且包含换行符（如 \\r\\n），由于缺乏相应的输出编码处理，可能会导致 HTTP 响应拆分或 CRLF 注入漏洞。",
+      "evidence": "代码中虽然对 value 进行了安全处理（Value: url.QueryEscape(value)），但 name、path 和 domain 直接拼接到结构体中（Name: name, Path: path, Domain: domain），未做任何 CRLF 字符的检查或转义。",
+      "function": "context.go:SetCookie"
+    },
+    {
+      "template_id": "tpl_049",
+      "pattern_name": "unescape_error_ignored",
+      "confidence": 0.85,
+      "severity": "low",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-390",
+        "CWE-754"
+      ],
+      "reasoning": "在调用 url.QueryUnescape 解码外部输入的 Cookie 值时，通过下划线 _ 忽略了可能返回的错误。如果 Cookie 值包含非法的 URL 编码（如无效的十六进制字符 %ZZ），QueryUnescape 会返回错误和部分解析的字符串。忽略此错误并将 nil 返回给调用方会误导调用方认为解码完全成功，可能导致下游逻辑处理了畸形的字符串数据，引发不可预期的应用逻辑错误。",
+      "evidence": "val, _ := url.QueryUnescape(cookie.Value)",
+      "function": "context.go:Cookie"
+    },
+    {
+      "template_id": "tpl_070",
+      "pattern_name": "log_injection",
+      "confidence": 0.8,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "函数作为一个通用的日志打印组件，接收外部传入的动态变量 values 并通过 fmt.Fprintf 拼接到输出流中。在这个过程中，函数没有对包含换行符（\\n, \\r）或控制字符的外部数据进行转义或过滤。如果上层调用者将未净化的外部输入（如 HTTP 请求路径、参数等）传入 values，攻击者就可以通过注入伪造的日志条目来掩盖攻击轨迹或破坏日志系统。",
+      "evidence": "fmt.Fprintf(DefaultWriter, \"[GIN-debug] \"+format, values...)",
+      "function": "debug.go:debugPrint"
+    },
+    {
+      "template_id": "tpl_068",
+      "pattern_name": "internal_error_exposure",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-209"
+      ],
+      "reasoning": "该函数作为中间件收集请求处理期间产生的错误，并直接通过 HTTP 响应（c.JSON）返回给客户端，而不进行任何敏感信息过滤或转换。如果在 c.Next() 执行期间发生内部错误（如数据库异常、文件系统路径找不到等），c.Errors 可能包含堆栈跟踪、查询字符串或内部路径等敏感信息。直接返回这些原始错误数据可能暴露系统内部实现细节给攻击者，辅助其进行进一步的攻击。",
+      "evidence": "c.JSON(-1, errors)",
+      "function": "logger.go:ErrorLoggerT"
+    },
+    {
+      "template_id": "tpl_049",
+      "pattern_name": "unhandled_type_assertion_panic",
+      "confidence": 0.6,
+      "severity": "low",
+      "missing_step_category": "error_handling",
+      "cwe_alignment": [
+        "CWE-754"
+      ],
+      "reasoning": "在将 w.ResponseWriter 断言为 http.Flusher 时，未使用安全的 comma-ok 模式（如 flusher, ok := w.ResponseWriter.(http.Flusher)）。如果底层的 ResponseWriter 没有实现 http.Flusher 接口，此处会引发运行时 panic，从而导致服务崩溃并可能被用作拒绝服务攻击。正确的做法应当是先检查是否实现了该接口或者使用 recover 机制。",
+      "evidence": "w.ResponseWriter.(http.Flusher).Flush()",
+      "function": "response_writer.go:Flush"
+    },
+    {
+      "template_id": "tpl_043",
+      "pattern_name": "xml_tag_name_injection",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-74",
+        "CWE-116"
+      ],
+      "reasoning": "函数将 map 的 key 直接作为 XML 元素的标签名（Local 字段）。XML 规范对元素名称有严格的字符限制，不允许包含 '<'、'>' 或空格等特殊字符。同时，Go 的 encoding/xml 包在写入 StartElement 时不会对 Name.Local 进行转义，而是直接拼接输出。如果该 map 的 key 来源于不可信的外部输入（如用户提交的 JSON 转换而来），攻击者可以在 key 中注入特殊字符（如 'key><injected'），从而破坏 XML 结构，导致 XML 注入或引发解析错误。",
+      "evidence": "代码行 `Name: xml.Name{Space: \"\", Local: key}` 直接将外部的 key 作为 XML 标签名，未经过任何过滤、验证或编码，随后通过 `e.EncodeElement(value, elem)` 写入 XML 流。",
+      "function": "utils.go:MarshalXML"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_memory_allocation",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-789"
+      ],
+      "reasoning": "函数使用 ioutil.ReadAll(c.Request.Body) 读取 HTTP 请求体，但在读取前没有使用 io.LimitReader 或检查 Content-Length 来限制读取的最大字节数。攻击者可以发送具有极大体积的请求体，导致服务器在执行 ReadAll 时消耗所有可用内存，从而引发 OOM (Out of Memory) 错误和拒绝服务。",
+      "evidence": "body, err = ioutil.ReadAll(c.Request.Body)",
+      "function": "context.go:ShouldBindBodyWith"
+    },
+    {
+      "template_id": "tpl_055",
+      "pattern_name": "unbounded_request_body_allocation",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400",
+        "CWE-789"
+      ],
+      "reasoning": "函数直接使用 ioutil.ReadAll 读取来自外部不可信源的 HTTP 请求体。由于未对读取的字节流大小进行任何限制，攻击者可以发送超大体积的请求体，导致服务器在将整个 Body 读入内存时消耗大量资源，最终引发内存耗尽和拒绝服务攻击。",
+      "evidence": "函数直接执行 return ioutil.ReadAll(c.Request.Body)，其中 c.Request.Body 是外部输入，读取过程未使用 io.LimitReader 等机制限制最大读取长度。",
+      "function": "context.go:GetRawData"
+    },
+    {
+      "template_id": "tpl_039",
+      "pattern_name": "slice_index_out_of_bounds",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "bounds_check",
+      "cwe_alignment": [
+        "CWE-129",
+        "CWE-400"
+      ],
+      "reasoning": "在将键值对存入新字典时，代码直接访问了切片的第一个元素 v[0]，但未检查切片 v 的长度是否大于 0。如果传入的 map 数据源允许构造空切片（例如通过 JSON 解析包含 `\"key[sub]\": []` 的请求数据传入），当函数处理到该键值时，访问 v[0] 将触发 'index out of range' 的运行时恐慌，进而导致整个服务崩溃，形成拒绝服务漏洞。",
+      "evidence": "代码行 `dicts[k[i+1:][:j]] = v[0]` 在未对切片长度进行验证（如 `len(v) > 0`）的情况下，直接硬编码访问了下标 0。",
+      "function": "context.go:get"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_request_parsing",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400"
+      ],
+      "reasoning": "函数接收包含不可信外部输入的 HTTP 请求对象，并将其直接传递给底层绑定器进行反序列化操作。在此过程中，未使用 io.LimitReader 或 http.MaxBytesReader 对请求体的大小进行限制。攻击者可以通过发送超大体积的请求体，导致服务器在读取和解析时消耗过多的内存和CPU资源，最终造成拒绝服务攻击。",
+      "evidence": "b.Bind(c.Request, obj) 直接将未经过大小限制的 c.Request 传递给底层绑定器，缺失了针对请求体体积的资源限制步骤。",
+      "function": "context.go:ShouldBindWith"
+    },
+    {
+      "template_id": "tpl_061",
+      "pattern_name": "missing_content_type_options",
+      "confidence": 0.7,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-79"
+      ],
+      "reasoning": "函数直接调用 http.ServeFile 提供文件服务，未在响应头中强制添加 X-Content-Type-Options: nosniff 或 Content-Disposition: attachment 等安全响应头。如果该函数被用于向外暴露用户上传的文件（例如 HTML 或 SVG 文件），浏览器可能会将其作为活动内容（如脚本）直接解析执行，从而导致存储型跨站脚本攻击（Stored XSS）。",
+      "evidence": "http.ServeFile(c.Writer, c.Request, filepath)",
+      "function": "context.go:File"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "unvalidated_file_path",
+      "confidence": 0.6,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22"
+      ],
+      "reasoning": "函数在将参数 filepath 传递给 http.ServeFile 之前，未进行路径清洗（如 filepath.Clean）或安全目录边界校验（如检查是否包含 .. 或是否在允许的根目录下）。虽然 Go 标准库的 http.ServeFile 会一定程度上缓解 URL 路径的遍历，但如果传入的 filepath 参数由恶意外部输入直接控制，框架将安全检查的责任全部交给了调用方，极易在业务层产生路径遍历漏洞，导致任意文件读取。",
+      "evidence": "func (c *Context) File(filepath string) {\\n\\thttp.ServeFile(c.Writer, c.Request, filepath)\\n}",
+      "function": "context.go:File"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "log_injection",
+      "confidence": 0.6,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117"
+      ],
+      "reasoning": "函数使用 fmt.Fprintf 将未经过滤和转义的 err 内容直接写入到输出流 DefaultErrorWriter 中。若该 err 来源于处理恶意请求时产生的错误（例如包含了恶意换行符或控制字符的请求路径），攻击者可能通过伪造错误来注入虚假的日志条目，破坏日志结构的完整性。由于该函数受到 IsDebugging() 状态的严格保护，且主要输出到标准错误，在实际生产环境中（通常关闭调试模式）被利用的概率极低，因此评为低危。",
+      "evidence": "fmt.Fprintf(DefaultErrorWriter, \"[GIN-debug] [ERROR] %v\\n\", err)",
+      "function": "debug.go:debugPrintError"
+    },
+    {
+      "template_id": "tpl_052",
+      "pattern_name": "log_injection_via_format",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-117",
+        "CWE-74"
+      ],
+      "reasoning": "函数在 format_string 步骤中，使用 fmt.Fprintf 将外部或不可信的 msg.Err 和 msg.Meta 直接拼接到字符串缓冲区中，未进行任何转义或编码处理。如果这些错误信息包含了由攻击者控制的输入（例如包含 \\n 或 \\r 的 HTTP 请求路径或参数），攻击者可以利用此缺陷伪造日志条目（日志注入），或者如果该字符串被直接用于 HTTP 响应，还可能导致 CRLF 注入。",
+      "evidence": "代码行 fmt.Fprintf(&buffer, \"Error #%02d: %s\\n\", i+1, msg.Err) 和 fmt.Fprintf(&buffer, \"     Meta: %v\\n\", msg.Meta) 直接使用 %s 和 %v 格式化未知来源的错误数据，缺少对换行符等控制字符的 output_encoding 检查。",
+      "function": "errors.go:String"
+    },
+    {
+      "template_id": "tpl_059",
+      "pattern_name": "timing_side_channel_secret_compare",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "cryptographic_verification",
+      "cwe_alignment": [
+        "CWE-208"
+      ],
+      "reasoning": "函数在验证用户凭证 时使用了简单的相等运算符 `==` 进行比较。由于普通的字符串比较在遇到第一个不匹配的字节时就会立即返回（短路求值），这导致比较操作的执行时间会随着正确匹配的前缀长度而变化。在处理安全敏感的认证凭证时，这种非恒定时间的比较会引入时序侧信道漏洞，攻击者可以通过测量响应时间的微小差异，逐字节推断并暴力破解出正确的凭证。",
+      "evidence": "代码行 `if pair.value == authValue` 使用了非常量时间的字符串比较，未采用如 `crypto/subtle.ConstantTimeCompare` 等恒定时间的密码学安全比较函数。",
+      "function": "auth.go:searchCredential"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "xml_unbounded_parsing",
+      "confidence": 0.75,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400"
+      ],
+      "reasoning": "函数将外部不可信的 HTTP 请求体直接交由 XML 解析器处理。在此过程中，未对请求体的最大长度、解析时的递归深度或内存消耗设置任何配额限制。攻击者可以发送超大体积的 XML 数据或包含深度嵌套/实体扩展的 'Billion Laughs' 攻击载荷，导致服务器在解析时消耗大量 CPU 和内存资源，进而引发拒绝服务。",
+      "evidence": "函数直接将上下文传递给底层的 XML 绑定引擎处理，代码为 return c.MustBindWith(obj, binding.XML)，在 BindXML 的调用链中没有任何针对 resource_limit 的拦截或校验。",
+      "function": "context.go:BindXML"
+    },
+    {
+      "template_id": "tpl_045",
+      "pattern_name": "unbounded_yaml_allocation",
+      "confidence": 0.6,
+      "severity": "medium",
+      "missing_step_category": "resource_limit",
+      "cwe_alignment": [
+        "CWE-400"
+      ],
+      "reasoning": "BindYAML 函数将 HTTP 请求体的解析直接委托给底层的 YAML 绑定器，而在函数内部没有施加任何针对请求体大小或读取超时的限制（如使用 io.LimitReader）。如果服务端在上游未配置全局的请求体大小限制（例如 Nginx 的 client_max_body_size 或 Go 的 http.MaxBytesReader），攻击者可以发送极其庞大的 YAML 负载，导致服务器在解析时消耗大量内存和 CPU，最终引发拒绝服务。",
+      "evidence": "return c.MustBindWith(obj, binding.YAML)",
+      "function": "context.go:BindYAML"
+    },
+    {
+      "template_id": "tpl_069",
+      "pattern_name": "jsonp_callback_injection",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-79"
+      ],
+      "reasoning": "函数直接将用户通过查询参数提供的 'callback' 值传递给渲染器并写入 HTTP 响应。在典型的 JSONP 实现中，该 callback 值会被直接拼接到响应体中（如 `callback(...)`）。由于缺少对 callback 的字符过滤和合法性验证（input_sanitization），攻击者可以注入包含 HTML 标签或恶意 JavaScript 代码的字符串。如果目标浏览器将其作为脚本执行，可能导致反射型跨站脚本攻击 (XSS)。",
+      "evidence": "代码 `c.Render(code, render.JsonpJSON{Callback: callback, Data: obj})` 中的 `callback` 直接来源于 `c.DefaultQuery(\"callback\", \"\")`，在传递给 Render 前未经过任何验证或转义处理。",
+      "function": "context.go:JSONP"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "open_redirect_unvalidated_location",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-601"
+      ],
+      "reasoning": "函数接收外部可控制的 location 字符串参数，在没有任何验证（如 URL scheme 白名单、同源校验、相对路径限制）的情况下，直接将其透传到 render.Redirect 结构体中，最终写入 HTTP Location 响应头。攻击者可构造恶意重定向 URL（如 https://trusted-site.com/redirect?location=https://evil.com），将用户从可信站点引导至攻击者控制的页面，实现钓鱼攻击或绕过基于 URL 信任的安全检查。此函数作为框架底层 API，安全校验责任应在此处或上游调用方完成，但函数本身未提供任何防护。",
+      "evidence": "render.Redirect{Code: code, Location: location, ...} 中 location 参数未经任何清洗或验证即被使用，直接赋值给 Location 字段，后续通过 c.Render 写入 HTTP Location 响应头。",
+      "function": "context.go:Redirect"
+    },
+    {
+      "template_id": "tpl_043",
+      "pattern_name": "header_injection_via_location",
+      "confidence": 0.5,
+      "severity": "low",
+      "missing_step_category": "output_encoding",
+      "cwe_alignment": [
+        "CWE-113"
+      ],
+      "reasoning": "location 参数未经编码或转义即被写入 HTTP 响应头。若攻击者在 location 中注入 CRLF 字符（\\r\\n），理论上可导致 HTTP 响应头拆分，伪造额外的响应头或响应体。不过现代 Go net/http 库在 Header.Write 时通常会对换行符进行检测和过滤，因此实际可利用性较低，但作为框架层面的防御仍应考虑。",
+      "evidence": "location 参数直接赋值给 render.Redirect.Location，未对其中可能包含的 \\r\\n 等控制字符进行过滤或编码，最终通过 c.Render 流入 HTTP 响应头写入流程。",
+      "function": "context.go:Redirect"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "gin.go:serveError",
+      "score": 32,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: Write",
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template",
+        "name suggests: serve"
+      ]
+    },
+    {
+      "function": "context.go:FileAttachment",
+      "score": 27,
+      "reasons": [
+        "dangerous sink: string_format",
+        "API match: Set",
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: fmt.Sprintf",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintLoadTemplate",
+      "score": 25,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: w.WriteHeaderNow",
+        "API match: io.WriteString",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: buf.String",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:RunFd",
+      "score": 25,
+      "reasons": [
+        "dangerous sink: string_format",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Sprintf",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "recovery.go:RecoveryWithWriter",
+      "score": 25,
+      "reasons": [
+        "API match: strings.Contains",
+        "API match: strings.ToLower",
+        "API match: Error",
+        "API match: fmt.Fprintf",
+        "API match: ioutil.ReadFile",
+        "API match: bytes.Split",
+        "API match: source",
+        "API match: strings.Split",
+        "API match: strings.Join",
+        "API match: Error",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "response_writer.go:Write",
+      "score": 22,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "uses net/http",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "gin.go:RunUnix",
+      "score": 18,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: os.Remove",
+        "API match: net.Listen",
+        "API match: os.Chmod",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "response_writer.go:WriteString",
+      "score": 18,
+      "reasons": [
+        "dangerous sink: write",
+        "API match: w.WriteHeaderNow",
+        "API match: io.WriteString",
+        "uses net/http",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "logger.go:defaultLogFormatter",
+      "score": 15,
+      "reasons": [
+        "dangerous sink: string_format",
+        "API match: fmt.Sprintf",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "logger.go:LoggerWithConfig",
+      "score": 15,
+      "reasons": [
+        "API match: strings.TrimSpace",
+        "API match: strings.Split",
+        "API match: net.SplitHostPort",
+        "API match: String",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprint",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "context.go:Header",
+      "score": 14,
+      "reasons": [
+        "API match: Del",
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: Set",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "auth.go:BasicAuthForRealm",
+      "score": 13,
+      "reasons": [
+        "API match: Get",
+        "API match: c.Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "uses net/http",
+        "name suggests: auth"
+      ]
+    },
+    {
+      "function": "routergroup.go:createStaticHandler",
+      "score": 13,
+      "reasons": [
+        "API match: ByName",
+        "API match: Open",
+        "API match: Get",
+        "API match: Put",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "context.go:SaveUploadedFile",
+      "score": 12,
+      "reasons": [
+        "has data flow (source+sink)",
+        "API match: Open",
+        "API match: os.Create",
+        "API match: io.Copy",
+        "uses net/http",
+        "name suggests: upload"
+      ]
+    },
+    {
+      "function": "gin.go:addRoute",
+      "score": 12,
+      "reasons": [
+        "API match: get",
+        "API match: strings.IndexByte",
+        "API match: get",
+        "API match: strings.SplitN",
+        "API match: strings.Index",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:Run",
+      "score": 12,
+      "reasons": [
+        "API match: fmt.Fprintf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: http.ListenAndServe",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:RunListener",
+      "score": 12,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:redirectRequest",
+      "score": 12,
+      "reasons": [
+        "API match: String",
+        "API match: fmt.Fprintf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "recovery.go:Recovery",
+      "score": 12,
+      "reasons": [
+        "API match: strings.Contains",
+        "API match: strings.ToLower",
+        "API match: strings.Split",
+        "API match: strings.Join",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "recovery.go:stack",
+      "score": 12,
+      "reasons": [
+        "API match: fmt.Fprintf",
+        "API match: ioutil.ReadFile",
+        "API match: bytes.Split",
+        "API match: source",
+        "API match: bytes.TrimSpace",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "gin.go:handleHTTPRequest",
+      "score": 11,
+      "reasons": [
+        "API match: path.Clean",
+        "API match: Get",
+        "API match: Header",
+        "API match: Write",
+        "uses html/template",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "routergroup.go:handle",
+      "score": 11,
+      "reasons": [
+        "API match: get",
+        "API match: strings.SplitN",
+        "API match: strings.Index",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "context.go:ClientIP",
+      "score": 10,
+      "reasons": [
+        "API match: Get",
+        "API match: strings.TrimSpace",
+        "API match: strings.Split",
+        "API match: net.SplitHostPort",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "context.go:FileFromFS",
+      "score": 10,
+      "reasons": [
+        "API match: ServeHTTP",
+        "API match: Get",
+        "API match: Put",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintRoute",
+      "score": 10,
+      "reasons": [
+        "API match: Name",
+        "API match: reflect.ValueOf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintWARNINGDefault",
+      "score": 10,
+      "reasons": [
+        "API match: strings.IndexByte",
+        "API match: strconv.ParseUint",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "errors.go:JSON",
+      "score": 10,
+      "reasons": [
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON"
+      ]
+    },
+    {
+      "function": "errors.go:JSON",
+      "score": 10,
+      "reasons": [
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON"
+      ]
+    },
+    {
+      "function": "gin.go:RunTLS",
+      "score": 10,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:redirectTrailingSlash",
+      "score": 10,
+      "reasons": [
+        "API match: path.Clean",
+        "API match: Get",
+        "API match: String",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    }
+  ]
+}

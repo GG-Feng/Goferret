@@ -1,0 +1,565 @@
+{
+  "scan_info": {
+    "target": "D:\\Projects\\go_vuln_detect\\vuln_data\\GO-2020-0001\\vulnerable",
+    "timestamp": "2026-05-05T18:33:22",
+    "model": "GLM-5.1",
+    "total_functions": 247,
+    "analyzed_functions": 30,
+    "total_templates_matched": 49,
+    "total_duration": 1548.5
+  },
+  "project_domains": [
+    {
+      "domain": "NetworkRequestAndProtocolHandling",
+      "confidence": 1.0,
+      "evidence": "导入并使用了 net, net/http, net/url 等网络请求库，且存在大量如 Abort, Next, Handler 等 Web 框架路由与请求处理相关的调用链。"
+    },
+    {
+      "domain": "InputParsingAndDeserialization",
+      "confidence": 0.9,
+      "evidence": "导入并使用了 bufio, encoding/xml, mime/multipart, io, strings 等大量用于解析外部字节流、文本和请求数据的标准库。"
+    },
+    {
+      "domain": "AuthenticationAndAuthorization",
+      "confidence": 0.8,
+      "evidence": "关键函数调用链中包含 BasicAuth, BasicAuthForRealm, searchCredential, authorizationHeader 等明确的身份验证和权限校验操作。"
+    },
+    {
+      "domain": "PathHandlingAndFilesystemAccess",
+      "confidence": 0.7,
+      "evidence": "使用了 os, path, io/ioutil 标准库，具备处理路径和文件系统交互的能力。"
+    },
+    {
+      "domain": "QueryTemplateAndExpressionConstruction",
+      "confidence": 0.6,
+      "evidence": "导入了 html/template 和 regexp，调用涉及模板解析与渲染以及正则表达式处理。"
+    },
+    {
+      "domain": "ConcurrencyStateAndSharedResourceManagement",
+      "confidence": 0.6,
+      "evidence": "使用了 sync 包（Mutex, WaitGroup 等），用于处理并发状态与协调共享资源。"
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "by_severity": {
+      "medium": 6,
+      "high": 3
+    },
+    "by_domain": {
+      "PathHandlingAndFilesystemAccess": 5,
+      "NetworkRequestAndProtocolHandling": 4
+    },
+    "by_category": {
+      "access_control": 1,
+      "path_validation": 4,
+      "input_sanitization": 3,
+      "origin_validation": 1
+    }
+  },
+  "findings": [
+    {
+      "template_id": "tpl_057",
+      "pattern_name": "Insecure File/Directory Permissions",
+      "confidence": 0.95,
+      "severity": "medium",
+      "missing_step_category": "access_control",
+      "cwe_alignment": [
+        "CWE-276",
+        "CWE-732"
+      ],
+      "reasoning": "函数在创建 Unix 套接字文件后，硬编码调用 os.Chmod(file, 0777) 将其权限设置为全局可读写执行。这违反了最小权限原则，允许系统上的任何本地用户连接、读写甚至潜在替换该套接字文件。对于本地域套接字，应该使用严格的权限（如 0700 或 0770）来限制只有特定的用户或组能够访问该服务。",
+      "evidence": "err = os.Chmod(file, 0777)",
+      "function": "gin.go:RunUnix"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "PathHandlingAndFilesystemAccess / path_validation",
+      "confidence": 0.85,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-73"
+      ],
+      "reasoning": "filepath 参数在传递给 http.ServeFile 之前，未经过任何路径规范化（如 filepath.Clean）或目录边界检查。如果该参数的值受用户请求控制，攻击者可以通过提供包含 '../' 的相对路径或绝对路径来实现路径遍历，从而读取并下载服务器上的任意文件。",
+      "evidence": "http.ServeFile(c.Writer, c.Request, filepath)",
+      "function": "context.go:FileAttachment"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "NetworkRequestAndProtocolHandling / input_sanitization",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-79",
+        "CWE-117"
+      ],
+      "reasoning": "filename 参数未经转义或清洗，直接通过 fmt.Sprintf 插入到 Content-Disposition 头的双引号内。如果 filename 包含双引号 (\") 或转义字符，攻击者可以截断文件名并注入恶意 HTTP 头，或者结合换行符引发 HTTP 响应拆分攻击。",
+      "evidence": "c.Writer.Header().Set(\"content-disposition\", fmt.Sprintf(\"attachment; filename=\\\"%s\\\"\", filename))",
+      "function": "context.go:FileAttachment"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "PathHandlingAndFilesystemAccess / path_validation",
+      "confidence": 0.85,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-20",
+        "CWE-73"
+      ],
+      "reasoning": "函数直接从 URL 参数中获取 'filepath'，并在未进行任何路径规范化（如 path.Clean）或遍历字符（如 '../'）检查的情况下，将其直接传递给 fs.Open()。如果底层使用的 http.FileSystem 没有实现严格的路径限制，攻击者可以通过构造恶意路径实现目录遍历，读取预期目录之外的任意文件。",
+      "evidence": "file := c.Param(\"filepath\")\n\t\t// Check if file exists and/or if we have permission to access it\n\t\tf, err := fs.Open(file)",
+      "function": "routergroup.go:createStaticHandler"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "Path Traversal",
+      "confidence": 0.9,
+      "severity": "high",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-73"
+      ],
+      "reasoning": "函数接收一个 dst 字符串参数并直接将其传递给 os.Create()。如果调用方传入的 dst 路径受用户控制且未在上游进行严格校验，攻击者可以通过构造包含 '../' 序列的恶意文件名或路径绕过目录限制，将文件写入或覆盖服务器预期目录之外的任意位置（如覆盖系统关键文件或写入恶意脚本）。",
+      "evidence": "out, err := os.Create(dst)",
+      "function": "context.go:SaveUploadedFile"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "Unvalidated URL Redirect",
+      "confidence": 0.85,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-601",
+        "CWE-20"
+      ],
+      "reasoning": "The function constructs a redirect response using the URL (`rURL`) directly extracted from the incoming request (`req.URL.String()`) without any validation or sanitization. An attacker could potentially manipulate the request path or Host header to force `req.URL.String()` to resolve to a protocol-relative URL (e.g., `//evil.com`) or an absolute external URL, causing the application to redirect the user to an untrusted domain.",
+      "evidence": "The variable `rURL` is assigned directly via `rURL := req.URL.String()` and is subsequently passed unmodified to `http.Redirect(c.Writer, req, rURL, code)` without any checks to ensure the redirect target is a safe, intended path.",
+      "function": "gin.go:redirectRequest"
+    },
+    {
+      "template_id": "tpl_051",
+      "pattern_name": "ip_origin_spoofing",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "origin_validation",
+      "cwe_alignment": [
+        "CWE-291",
+        "CWE-346",
+        "CWE-348"
+      ],
+      "reasoning": "该函数在 ForwardedByClientIP 开启时，盲目信任用户完全可控的 HTTP 请求头（如 X-Forwarded-For 和 X-Real-Ip）来决定客户端 IP。代码中缺乏对请求真实来源（如反向代理IP白名单校验）的验证逻辑。如果服务器未部署在受信任的反向代理之后，或者网络拓扑允许客户端直接访问该服务，攻击者可以轻易通过伪造这些请求头来欺骗其 IP 地址，从而绕过基于 IP 的访问控制、限流或日志审计。",
+      "evidence": "代码行 clientIP := c.requestHeader(\"X-Forwarded-For\") 和 clientIP = strings.TrimSpace(c.requestHeader(\"X-Real-Ip\")) 直接从入站请求中读取头部并作为客户端身份标识返回，期间未执行任何网络来源验证。",
+      "function": "context.go:ClientIP"
+    },
+    {
+      "template_id": "tpl_062",
+      "pattern_name": "PathHandlingAndFilesystemAccess / path_validation",
+      "confidence": 0.8,
+      "severity": "medium",
+      "missing_step_category": "path_validation",
+      "cwe_alignment": [
+        "CWE-22",
+        "CWE-20",
+        "CWE-73"
+      ],
+      "reasoning": "函数将外部传入的 'filepath' 参数直接赋值给请求路径，未进行任何路径规范化（如 path.Clean）或目录遍历（如 '../'）字符检查。尽管 Go 的 net/http 标准文件系统实现在一定程度上缓解了这种攻击，但如果传入的自定义 'fs http.FileSystem' 实现未对路径进行严格的安全校验，此行为将直接导致路径遍历漏洞，允许攻击者读取预期目录之外的文件。",
+      "evidence": "c.Request.URL.Path = filepath",
+      "function": "context.go:FileFromFS"
+    },
+    {
+      "template_id": "tpl_050",
+      "pattern_name": "NetworkRequestAndProtocolHandling / input_sanitization",
+      "confidence": 0.9,
+      "severity": "medium",
+      "missing_step_category": "input_sanitization",
+      "cwe_alignment": [
+        "CWE-601"
+      ],
+      "reasoning": "The function uses the 'X-Forwarded-Prefix' HTTP header to construct a redirect target. Although it attempts to sanitize the header using path.Clean, this function only normalizes directory traversals (like '/../') and does not reject absolute URLs with schemes (e.g., 'https://evil.com'). By providing an absolute URL as the prefix, an attacker can manipulate req.URL.Path to point to an external domain, which is then passed to redirectRequest, resulting in an Open Redirect vulnerability.",
+      "evidence": "if prefix := path.Clean(c.Request.Header.Get(\"X-Forwarded-Prefix\")); prefix != \".\" {\n\tp = prefix + \"/\" + req.URL.Path\n}\n...\nreq.URL.Path = p[:length-1]\nredirectRequest(c)",
+      "function": "gin.go:redirectTrailingSlash"
+    }
+  ],
+  "function_scores": [
+    {
+      "function": "recovery.go:RecoveryWithWriter",
+      "score": 25,
+      "reasons": [
+        "API match: strings.Contains",
+        "API match: strings.ToLower",
+        "API match: Error",
+        "API match: fmt.Fprintf",
+        "API match: ioutil.ReadFile",
+        "API match: bytes.Split",
+        "API match: source",
+        "API match: strings.Split",
+        "API match: strings.Join",
+        "API match: Error",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "gin.go:serveError",
+      "score": 22,
+      "reasons": [
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: Write",
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template",
+        "name suggests: serve"
+      ]
+    },
+    {
+      "function": "gin.go:RunUnix",
+      "score": 18,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: os.Remove",
+        "API match: net.Listen",
+        "API match: os.Chmod",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "context.go:FileAttachment",
+      "score": 17,
+      "reasons": [
+        "API match: Set",
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: fmt.Sprintf",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintLoadTemplate",
+      "score": 15,
+      "reasons": [
+        "API match: w.WriteHeaderNow",
+        "API match: io.WriteString",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: buf.String",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:RunFd",
+      "score": 15,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Sprintf",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "logger.go:LoggerWithConfig",
+      "score": 15,
+      "reasons": [
+        "API match: strings.TrimSpace",
+        "API match: strings.Split",
+        "API match: net.SplitHostPort",
+        "API match: String",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprint",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "context.go:Header",
+      "score": 14,
+      "reasons": [
+        "API match: Del",
+        "API match: Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "API match: Set",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "auth.go:BasicAuthForRealm",
+      "score": 13,
+      "reasons": [
+        "API match: Get",
+        "API match: c.Header",
+        "API match: Del",
+        "API match: Header",
+        "API match: Set",
+        "uses net/http",
+        "name suggests: auth"
+      ]
+    },
+    {
+      "function": "routergroup.go:createStaticHandler",
+      "score": 13,
+      "reasons": [
+        "API match: ByName",
+        "API match: Open",
+        "API match: Get",
+        "API match: Put",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "context.go:SaveUploadedFile",
+      "score": 12,
+      "reasons": [
+        "has data flow (source+sink)",
+        "API match: Open",
+        "API match: os.Create",
+        "API match: io.Copy",
+        "uses net/http",
+        "name suggests: upload"
+      ]
+    },
+    {
+      "function": "gin.go:addRoute",
+      "score": 12,
+      "reasons": [
+        "API match: get",
+        "API match: strings.IndexByte",
+        "API match: get",
+        "API match: strings.SplitN",
+        "API match: strings.Index",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:Run",
+      "score": 12,
+      "reasons": [
+        "API match: fmt.Fprintf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: http.ListenAndServe",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:RunListener",
+      "score": 12,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "API match: http.Serve",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:redirectRequest",
+      "score": 12,
+      "reasons": [
+        "API match: String",
+        "API match: fmt.Fprintf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "recovery.go:Recovery",
+      "score": 12,
+      "reasons": [
+        "API match: strings.Contains",
+        "API match: strings.ToLower",
+        "API match: strings.Split",
+        "API match: strings.Join",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "recovery.go:stack",
+      "score": 12,
+      "reasons": [
+        "API match: fmt.Fprintf",
+        "API match: ioutil.ReadFile",
+        "API match: bytes.Split",
+        "API match: source",
+        "API match: bytes.TrimSpace",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "response_writer.go:Write",
+      "score": 12,
+      "reasons": [
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "API match: w.WriteHeaderNow",
+        "API match: Write",
+        "uses net/http",
+        "name suggests: write"
+      ]
+    },
+    {
+      "function": "gin.go:handleHTTPRequest",
+      "score": 11,
+      "reasons": [
+        "API match: path.Clean",
+        "API match: Get",
+        "API match: Header",
+        "API match: Write",
+        "uses html/template",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "routergroup.go:handle",
+      "score": 11,
+      "reasons": [
+        "API match: get",
+        "API match: strings.SplitN",
+        "API match: strings.Index",
+        "HTTP handler",
+        "uses net/http",
+        "name suggests: handle"
+      ]
+    },
+    {
+      "function": "context.go:ClientIP",
+      "score": 10,
+      "reasons": [
+        "API match: Get",
+        "API match: strings.TrimSpace",
+        "API match: strings.Split",
+        "API match: net.SplitHostPort",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "context.go:FileFromFS",
+      "score": 10,
+      "reasons": [
+        "API match: ServeHTTP",
+        "API match: Get",
+        "API match: Put",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintRoute",
+      "score": 10,
+      "reasons": [
+        "API match: Name",
+        "API match: reflect.ValueOf",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "debug.go:debugPrintWARNINGDefault",
+      "score": 10,
+      "reasons": [
+        "API match: strings.IndexByte",
+        "API match: strconv.ParseUint",
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "errors.go:JSON",
+      "score": 10,
+      "reasons": [
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON"
+      ]
+    },
+    {
+      "function": "errors.go:JSON",
+      "score": 10,
+      "reasons": [
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON",
+        "API match: reflect.ValueOf",
+        "API match: JSON"
+      ]
+    },
+    {
+      "function": "gin.go:RunTLS",
+      "score": 10,
+      "reasons": [
+        "API match: strings.HasSuffix",
+        "API match: fmt.Fprintf",
+        "API match: fmt.Fprintf",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "gin.go:redirectTrailingSlash",
+      "score": 10,
+      "reasons": [
+        "API match: path.Clean",
+        "API match: Get",
+        "API match: String",
+        "HTTP handler",
+        "uses html/template"
+      ]
+    },
+    {
+      "function": "routergroup.go:Static",
+      "score": 10,
+      "reasons": [
+        "API match: strings.Contains",
+        "API match: path.Join",
+        "API match: Dir",
+        "HTTP handler",
+        "uses net/http"
+      ]
+    },
+    {
+      "function": "gin.go:ServeHTTP",
+      "score": 9,
+      "reasons": [
+        "API match: Get",
+        "API match: Put",
+        "HTTP handler",
+        "uses html/template",
+        "name suggests: serve"
+      ]
+    }
+  ]
+}

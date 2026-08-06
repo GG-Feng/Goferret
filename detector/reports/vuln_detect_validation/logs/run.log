@@ -1,0 +1,275 @@
+
+=== [GO-2020-0034/vulnerable] target=verify_samples/ArchiveAndCompressionProcessing/GO-2020-0034/vulnerable ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Merged 2 subdirectories for fuller coverage
+  Done in 0.1s: 3 functions, 3 call chains, 1 data flows
+[Stage 2/5] Domain classification...
+  Done in 29.5s: ['ArchiveAndCompressionProcessing', 'PathHandlingAndFilesystemAccess', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  22 candidates, top scores: [('tpl_059', '0.70'), ('tpl_004', '0.70'), ('tpl_057', '0.65'), ('tpl_060', '0.65'), ('tpl_005', '0.65')]
+[Stage 4/5] Function prioritization...
+  2 functions scored, top: [('Extract', 15), ('New', 2)]
+[Stage 5/5] Deep analysis (2 functions)...
+  [1/2] unzip.go:Extract -> 5 finding(s)
+  [2/2] unzip.go:New -> clean
+  Done in 92.5s: 2 analyzed, 5 findings
+
+==================================================
+Done. Time: 122.1s
+  Functions analyzed: 2
+  Findings: 5 (threshold: 0.5)
+    [HIGH] unzip.go:Extract: zip_slip_path_traversal (confidence: 0.95)
+    [HIGH] unzip.go:Extract: compression_bomb_unbounded (confidence: 0.90)
+    [MEDIUM] unzip.go:Extract: archive_permission_inheritance (confidence: 0.85)
+    [LOW] unzip.go:Extract: mkdir_error_ignored (confidence: 0.85)
+    [LOW] unzip.go:Extract: archive_name_log_injection (confidence: 0.75)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_141610
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2020-0034_vulnerable.json
+[GO-2020-0034/vulnerable] elapsed=124s out=verify_runs/GO-2020-0034_vulnerable.json
+
+=== [GO-2020-0034/patch] target=verify_samples/ArchiveAndCompressionProcessing/GO-2020-0034/patch ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Merged 2 subdirectories for fuller coverage
+  Done in 0.3s: 3 functions, 3 call chains, 1 data flows
+[Stage 2/5] Domain classification...
+  Done in 16.2s: ['ArchiveAndCompressionProcessing', 'PathHandlingAndFilesystemAccess', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  22 candidates, top scores: [('tpl_004', '0.72'), ('tpl_062', '0.70'), ('tpl_059', '0.70'), ('tpl_057', '0.65'), ('tpl_060', '0.65')]
+[Stage 4/5] Function prioritization...
+  2 functions scored, top: [('Extract', 21), ('New', 2)]
+[Stage 5/5] Deep analysis (2 functions)...
+  [1/2] unzip.go:Extract -> 4 finding(s)
+  [2/2] unzip.go:New -> clean
+  Done in 149.3s: 2 analyzed, 4 findings
+
+==================================================
+Done. Time: 165.8s
+  Functions analyzed: 2
+  Findings: 4 (threshold: 0.5)
+    [HIGH] unzip.go:Extract: zip_bomb_unbounded_decompression (confidence: 0.95)
+    [MEDIUM] unzip.go:Extract: zip_entry_mode_injection (confidence: 0.88)
+    [MEDIUM] unzip.go:Extract: mkdirall_error_ignored (confidence: 0.90)
+    [LOW] unzip.go:Extract: zip_entry_name_log_injection (confidence: 0.80)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_141815
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2020-0034_patch.json
+[GO-2020-0034/patch] elapsed=168s out=verify_runs/GO-2020-0034_patch.json
+
+=== [GO-2023-1494/vulnerable] target=verify_samples/QueryTemplateAndExpressionConstruction/GO-2023-1494/vulnerable ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.1s: 5 functions, 5 call chains, 4 data flows
+[Stage 2/5] Domain classification...
+  Done in 23.3s: ['QueryTemplateAndExpressionConstruction', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  15 candidates, top scores: [('tpl_069', '0.57'), ('tpl_071', '0.47'), ('tpl_072', '0.47'), ('tpl_068', '0.47'), ('tpl_044', '0.47')]
+[Stage 4/5] Function prioritization...
+  5 functions scored, top: [('QueryDbToArrayJson', 5), ('QueryDbToMapJson', 5), ('QueryDbToArray', 5), ('QueryDbToMap', 5), ('ExecDb', 4)]
+[Stage 5/5] Deep analysis (5 functions)...
+  [1/5] gosqljson.go:QueryDbToArrayJson -> 2 finding(s)
+  [2/5] gosqljson.go:QueryDbToMapJson -> 2 finding(s)
+  [3/5] gosqljson.go:QueryDbToArray -> 3 finding(s)
+  [4/5] gosqljson.go:QueryDbToMap -> 3 finding(s)
+  [5/5] gosqljson.go:ExecDb -> 3 finding(s)
+  Done in 472.1s: 5 analyzed, 13 findings
+
+==================================================
+Done. Time: 495.4s
+  Functions analyzed: 5
+  Findings: 13 (threshold: 0.5)
+    [MEDIUM] gosqljson.go:QueryDbToArrayJson: unchecked_error_overwrite (confidence: 0.95)
+    [HIGH] gosqljson.go:QueryDbToArrayJson: raw_sql_statement_no_sanitization (confidence: 0.75)
+    [HIGH] gosqljson.go:QueryDbToMapJson: swallowed_db_query_error (confidence: 0.95)
+    [MEDIUM] gosqljson.go:QueryDbToMapJson: unsanitized_sql_statement_input (confidence: 0.60)
+    [MEDIUM] gosqljson.go:QueryDbToArray: ignored_scan_column_errors (confidence: 0.90)
+    [HIGH] gosqljson.go:QueryDbToArray: unclosed_db_rows_resource_leak (confidence: 0.90)
+    [MEDIUM] gosqljson.go:QueryDbToArray: unsanitized_sql_statement_passthrough (confidence: 0.60)
+    [HIGH] gosqljson.go:QueryDbToMap: unsanitized_sql_statement_passthrough (confidence: 0.75)
+    [MEDIUM] gosqljson.go:QueryDbToMap: ignored_scan_column_errors (confidence: 0.90)
+    [MEDIUM] gosqljson.go:QueryDbToMap: unbounded_result_set_accumulation (confidence: 0.85)
+    [MEDIUM] gosqljson.go:ExecDb: swallowed_panic_silent_failure (confidence: 0.90)
+    [MEDIUM] gosqljson.go:ExecDb: unfiltered_error_stdout_output (confidence: 0.80)
+    [HIGH] gosqljson.go:ExecDb: insufficient_sql_prefix_validation (confidence: 0.75)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_142103
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2023-1494_vulnerable.json
+[GO-2023-1494/vulnerable] elapsed=498s out=verify_runs/GO-2023-1494_vulnerable.json
+
+=== [GO-2023-1494/patch] target=verify_samples/QueryTemplateAndExpressionConstruction/GO-2023-1494/patch ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.3s: 6 functions, 6 call chains, 4 data flows
+[Stage 2/5] Domain classification...
+  Done in 16.5s: ['QueryTemplateAndExpressionConstruction', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  15 candidates, top scores: [('tpl_069', '0.57'), ('tpl_071', '0.47'), ('tpl_072', '0.47'), ('tpl_070', '0.47'), ('tpl_073', '0.47')]
+[Stage 4/5] Function prioritization...
+  6 functions scored, top: [('QueryDbToArray', 7), ('QueryDbToMap', 7), ('ExecDb', 6), ('QueryDbToArrayJson', 5), ('QueryDbToMapJson', 5)]
+[Stage 5/5] Deep analysis (5 functions)...
+  [1/5] gosqljson.go:QueryDbToArray -> 6 finding(s)
+  [2/5] gosqljson.go:QueryDbToMap -> 3 finding(s)
+  [3/5] gosqljson.go:ExecDb -> 3 finding(s)
+  [4/5] gosqljson.go:QueryDbToArrayJson -> 1 finding(s)
+  [5/5] gosqljson.go:QueryDbToMapJson -> 2 finding(s)
+  Done in 550.9s: 5 analyzed, 15 findings
+
+==================================================
+Done. Time: 567.7s
+  Functions analyzed: 5
+  Findings: 15 (threshold: 0.5)
+    [MEDIUM] gosqljson.go:QueryDbToArray: scan_error_ignored (confidence: 0.92)
+    [MEDIUM] gosqljson.go:QueryDbToArray: columns_error_swallowed (confidence: 0.88)
+    [HIGH] gosqljson.go:QueryDbToArray: recover_swallows_error (confidence: 0.90)
+    [HIGH] gosqljson.go:QueryDbToArray: unbounded_result_set (confidence: 0.82)
+    [HIGH] gosqljson.go:QueryDbToArray: sql_blacklist_bypass (confidence: 0.65)
+    [LOW] gosqljson.go:QueryDbToArray: log_output_unescaped (confidence: 0.60)
+    [HIGH] gosqljson.go:QueryDbToMap: inadequate_sql_injection_filter (confidence: 0.85)
+    [MEDIUM] gosqljson.go:QueryDbToMap: ignored_scan_error_data_corruption (confidence: 0.90)
+    [MEDIUM] gosqljson.go:QueryDbToMap: unbounded_result_accumulation (confidence: 0.80)
+    [MEDIUM] gosqljson.go:ExecDb: unescaped_sql_in_error_message (confidence: 0.85)
+    [MEDIUM] gosqljson.go:ExecDb: sensitive_error_to_stdout (confidence: 0.80)
+    [MEDIUM] gosqljson.go:ExecDb: insufficient_sql_validation (confidence: 0.55)
+    [MEDIUM] gosqljson.go:QueryDbToArrayJson: swallowed_query_error (confidence: 0.95)
+    [MEDIUM] gosqljson.go:QueryDbToMapJson: query_error_swallowed (confidence: 0.95)
+    [LOW] gosqljson.go:QueryDbToMapJson: unbounded_query_result (confidence: 0.55)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_142921
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2023-1494_patch.json
+[GO-2023-1494/patch] elapsed=570s out=verify_runs/GO-2023-1494_patch.json
+
+=== [GO-2020-0024/vulnerable] target=verify_samples/NetworkRequestAndProtocolHandling/GO-2020-0024/vulnerable ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.1s: 11 functions, 11 call chains, 4 data flows
+[Stage 2/5] Domain classification...
+  Done in 26.3s: ['NetworkRequestAndProtocolHandling', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  18 candidates, top scores: [('tpl_054', '0.57'), ('tpl_053', '0.57'), ('tpl_047', '0.53'), ('tpl_055', '0.53'), ('tpl_046', '0.47')]
+[Stage 4/5] Function prioritization...
+  7 functions scored, top: [('Dial', 27), ('Write', 16), ('String', 13), ('Read', 6), ('Close', 4)]
+[Stage 5/5] Deep analysis (5 functions)...
+  [1/5] dial.go:Dial -> 3 finding(s)
+  [2/5] conn.go:Write -> clean
+  [3/5] addr.go:String -> 1 finding(s)
+  [4/5] conn.go:Read -> clean
+  [5/5] conn.go:Close -> clean
+  Done in 294.0s: 5 analyzed, 4 findings
+
+==================================================
+Done. Time: 320.4s
+  Functions analyzed: 5
+  Findings: 4 (threshold: 0.5)
+    [MEDIUM] dial.go:Dial: unvalidated_domain_length panic (confidence: 0.88)
+    [MEDIUM] dial.go:Dial: socks5_length_field_overflow (confidence: 0.82)
+    [LOW] dial.go:Dial: missing_io_timeout (confidence: 0.75)
+    [LOW] addr.go:String: unescaped_host_format (confidence: 0.60)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_143852
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2020-0024_vulnerable.json
+[GO-2020-0024/vulnerable] elapsed=323s out=verify_runs/GO-2020-0024_vulnerable.json
+
+=== [GO-2020-0024/patch] target=verify_samples/NetworkRequestAndProtocolHandling/GO-2020-0024/patch ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.1s: 11 functions, 11 call chains, 4 data flows
+[Stage 2/5] Domain classification...
+  Done in 23.9s: ['NetworkRequestAndProtocolHandling', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  18 candidates, top scores: [('tpl_053', '0.57'), ('tpl_054', '0.57'), ('tpl_055', '0.53'), ('tpl_047', '0.53'), ('tpl_056', '0.47')]
+[Stage 4/5] Function prioritization...
+  9 functions scored, top: [('Dial', 27), ('Write', 16), ('String', 13), ('Read', 6), ('Close', 4)]
+[Stage 5/5] Deep analysis (5 functions)...
+  [1/5] dial.go:Dial -> 3 finding(s)
+  [2/5] conn.go:Write -> clean
+  [3/5] addr.go:String -> clean
+  [4/5] conn.go:Read -> clean
+  [5/5] conn.go:Close -> clean
+  Done in 376.3s: 5 analyzed, 3 findings
+
+==================================================
+Done. Time: 400.3s
+  Functions analyzed: 5
+  Findings: 3 (threshold: 0.5)
+    [MEDIUM] dial.go:Dial: socks5_domain_len_oob_read (confidence: 0.85)
+    [MEDIUM] dial.go:Dial: socks5_field_length_truncation (confidence: 0.80)
+    [LOW] dial.go:Dial: socks5_no_io_timeout (confidence: 0.60)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_144414
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2020-0024_patch.json
+[GO-2020-0024/patch] elapsed=402s out=verify_runs/GO-2020-0024_patch.json
+
+=== [GO-2022-0957/vulnerable] target=verify_samples/InputParsingAndDeserialization/GO-2022-0957/vulnerable ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.1s: 5 functions, 5 call chains, 0 data flows
+[Stage 2/5] Domain classification...
+  Done in 59.0s: ['QueryTemplateAndExpressionConstruction', 'InputParsingAndDeserialization']
+[Stage 3/5] Pattern retrieval...
+  15 candidates, top scores: [('tpl_069', '0.40'), ('tpl_070', '0.40'), ('tpl_073', '0.40'), ('tpl_067', '0.40'), ('tpl_071', '0.40')]
+[Stage 4/5] Function prioritization...
+  3 functions scored, top: [('deepMatchRune', 4), ('deepMatch', 2), ('Allowable', 2)]
+[Stage 5/5] Deep analysis (3 functions)...
+  [1/3] match.go:deepMatchRune -> 2 finding(s)
+  [2/3] match.go:deepMatch -> 1 finding(s)
+  [3/3] match.go:Allowable -> clean
+  Done in 377.7s: 3 analyzed, 3 findings
+
+==================================================
+Done. Time: 436.8s
+  Functions analyzed: 3
+  Findings: 3 (threshold: 0.5)
+    [HIGH] match.go:deepMatchRune: glob_recursive_backtracking_dos (confidence: 0.90)
+    [MEDIUM] match.go:deepMatchRune: broken_utf8_error_guard (confidence: 0.85)
+    [MEDIUM] match.go:deepMatch: recursive_backtrack_dos (confidence: 0.70)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_145057
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2022-0957_vulnerable.json
+[GO-2022-0957/vulnerable] elapsed=439s out=verify_runs/GO-2022-0957_vulnerable.json
+
+=== [GO-2022-0957/patch] target=verify_samples/InputParsingAndDeserialization/GO-2022-0957/patch ===
+Loaded vuln_db: 77 templates, 1486 records
+
+[Stage 1/5] AST scan...
+  Done in 0.1s: 5 functions, 5 call chains, 0 data flows
+[Stage 2/5] Domain classification...
+  Done in 42.5s: ['QueryTemplateAndExpressionConstruction']
+[Stage 3/5] Pattern retrieval...
+  8 candidates, top scores: [('tpl_071', '0.20'), ('tpl_070', '0.20'), ('tpl_072', '0.20'), ('tpl_069', '0.20'), ('tpl_068', '0.20')]
+[Stage 4/5] Function prioritization...
+  0 functions scored, top: []
+[Stage 5/5] Deep analysis (0 functions)...
+  Done in 0.0s: 0 analyzed, 0 findings
+
+==================================================
+Done. Time: 42.6s
+  Functions analyzed: 0
+  Findings: 0 (threshold: 0.5)
+
+Project: C:\Users\16655\Desktop\go\projects\20260615_145816
+Report: C:\Users\16655\Desktop\go\verify_runs\GO-2022-0957_patch.json
+[GO-2022-0957/patch] elapsed=44s out=verify_runs/GO-2022-0957_patch.json
+
+=== ALL DONE ===
+total 116
+drwxr-xr-x 1 ARun 197609     0  6月 15 14:58 .
+drwxr-xr-x 1 ARun 197609     0  6月 15 14:14 ..
+-rwxr-xr-x 1 ARun 197609  1067  6月 15 14:15 _driver.sh
+-rw-r--r-- 1 ARun 197609  6572  6月 15 14:50 GO-2020-0024_patch.json
+-rw-r--r-- 1 ARun 197609  6929  6月 15 14:44 GO-2020-0024_vulnerable.json
+-rw-r--r-- 1 ARun 197609  5365  6月 15 14:21 GO-2020-0034_patch.json
+-rw-r--r-- 1 ARun 197609  6328  6月 15 14:18 GO-2020-0034_vulnerable.json
+-rw-r--r-- 1 ARun 197609   819  6月 15 14:58 GO-2022-0957_patch.json
+-rw-r--r-- 1 ARun 197609  5018  6月 15 14:58 GO-2022-0957_vulnerable.json
+-rw-r--r-- 1 ARun 197609 16828  6月 15 14:38 GO-2023-1494_patch.json
+-rw-r--r-- 1 ARun 197609 15944  6月 15 14:29 GO-2023-1494_vulnerable.json
+-rw-r--r-- 1 ARun 197609 13984  6月 15 14:59 run.log

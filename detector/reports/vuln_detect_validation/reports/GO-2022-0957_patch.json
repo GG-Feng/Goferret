@@ -1,0 +1,27 @@
+{
+  "scan_info": {
+    "project_id": "20260615_145816",
+    "target": "C:\\Users\\16655\\Desktop\\go\\verify_samples\\InputParsingAndDeserialization\\GO-2022-0957\\patch",
+    "timestamp": "2026-06-15T14:58:59",
+    "model": "GLM-5.1",
+    "total_functions": 5,
+    "analyzed_functions": 0,
+    "total_templates_matched": 8,
+    "total_duration": 42.6
+  },
+  "project_domains": [
+    {
+      "domain": "QueryTemplateAndExpressionConstruction",
+      "confidence": 0.4,
+      "evidence": "实现了自定义的模式匹配/表达式计算逻辑（包含 Match, deepMatch, IsPattern 等函数），与该域的核心行为一致"
+    }
+  ],
+  "summary": {
+    "total_findings": 0,
+    "by_severity": {},
+    "by_domain": {},
+    "by_category": {}
+  },
+  "findings": [],
+  "function_scores": []
+}

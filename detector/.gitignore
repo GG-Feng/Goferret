@@ -1,0 +1,52 @@
+# Environment variables (contains API keys)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Go toolchain
+# (Source of truth is ast_analyzer/main.go + go.mod; rebuild via `go build`.)
+ast_analyzer/ast_analyzer
+ast_analyzer/ast_analyzer.exe
+ast_analyzer/*.test
+ast_analyzer/coverage.out
+ast_analyzer/cover.html
+# Go build/test cache (lives under %GOCACHE% and %GOPATH%\pkg\mod)
+**/.cache/go-build/
+**/go.work.sum
+
+# Data and output
+*.csv
+*.json
+!requirements.json
+
+# Pipeline data products — regenerable, never committed.
+# enriched_inputs/ alone is ~1 GB; behavior_chains/ is 1486 LLM extractions.
+# Rebuild via the stage 1-11 pipeline described in CLAUDE.md.
+vuln/
+repos/
+vuln_data/
+vuln_infos/
+prepared_inputs/
+classifications/
+classifications_v2/
+enriched_inputs/
+behavior_chains/
+projects/
+
+# Sample reports and validation evidence are kept: they are the input
+# samples the reproduction/judgement workflow is written against.
+# reports/**/*.log overrides the root *.log rule — the validation READMEs
+# link to run.log as the raw evidence behind their numbers.
+!report.json
+!report_test.json
+!reports/**/*.json
+!reports/**/*.log
+
+# OS
+Thumbs.db
+.DS_Store
