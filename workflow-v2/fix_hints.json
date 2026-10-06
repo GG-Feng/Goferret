@@ -1,0 +1,14 @@
+{
+  "input_sanitization": {"zh": "输入清洗", "issue": "外部输入未经清洗就进入了后续处理", "fix": "在使用输入前按预期格式做白名单校验或转义，拒绝不合法的值。"},
+  "bounds_check": {"zh": "边界检查", "issue": "长度、索引或数值范围未做检查", "fix": "在访问或分配前检查长度和范围，超出预期时返回错误。"},
+  "origin_validation": {"zh": "来源校验", "issue": "请求来源未经验证", "fix": "校验 Origin/Referer 或使用 CSRF token，拒绝不可信来源。"},
+  "access_control": {"zh": "访问控制", "issue": "操作前缺少权限判断", "fix": "在执行操作前检查调用方对目标资源的权限。"},
+  "output_encoding": {"zh": "输出编码", "issue": "外部内容未经转义就写入了输出", "fix": "按输出位置（HTML、日志、Shell 等）做转义或编码。"},
+  "resource_limit": {"zh": "资源上限", "issue": "读取、分配或解压没有上限", "fix": "为大小、数量、深度和时间设置上限（如 io.LimitReader、超时、最大条目数）。"},
+  "cryptographic_verification": {"zh": "密码学校验", "issue": "签名、证书或摘要未经校验", "fix": "使用标准库完成验签和证书校验，不要跳过或弱化。"},
+  "state_synchronization": {"zh": "状态同步", "issue": "并发访问共享状态时缺少同步", "fix": "用锁、原子操作或单一 goroutine 持有状态。"},
+  "error_handling": {"zh": "错误处理", "issue": "错误未被处理或被忽略", "fix": "检查每个返回的 error，失败时中止后续操作。"},
+  "path_validation": {"zh": "路径校验", "issue": "拼接的路径未限制在允许的目录内", "fix": "用 filepath.Clean 后校验前缀，或使用 os.Root / SecureJoin 一类的受限打开方式。"},
+  "identity_verification": {"zh": "身份验证", "issue": "敏感操作前未确认调用方身份", "fix": "在敏感操作前要求并校验有效的身份凭据。"},
+  "protocol_validation": {"zh": "协议校验", "issue": "协议字段或状态未按规范校验", "fix": "按协议规范校验字段取值、长度和状态转换，拒绝不合规的消息。"}
+}

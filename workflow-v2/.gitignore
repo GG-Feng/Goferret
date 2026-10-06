@@ -1,0 +1,12 @@
+/config.json
+/config_validation.json
+/cache/
+/cases/
+/cases_validation/
+/repos/
+/scans/
+/tmp/
+__pycache__/
+*.py[cod]
+.env
+.env.*

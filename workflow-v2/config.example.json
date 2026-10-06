@@ -1,0 +1,15 @@
+{
+  "src_root": "/absolute/path/to/sources",
+  "reports_root": "/absolute/path/to/reports",
+  "report_file": "report.json",
+  "goferret_dir": "/absolute/path/to/Goferret/detector",
+  "ast_analyzer": "/absolute/path/to/Goferret/detector/ast_analyzer/ast_analyzer",
+  "modcache": "/absolute/path/to/go/pkg/mod",
+  "docker_image": "golang:1.26",
+  "gocache_volume": "repro_gocache",
+  "per_repo": 5,
+  "max_design_rounds": 3,
+  "test_timeout_sec": 420,
+  "llm_max_tokens": 8192,
+  "repos": ["owner/repository"]
+}

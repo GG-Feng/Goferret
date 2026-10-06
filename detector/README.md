@@ -1,4 +1,4 @@
-# Go Vulnerability Workflow
+# Goferret 检测器
 
 面向 Go 项目的研究型漏洞检测与验证流水线。项目把本地 AST/污点分析、行为链知识库、LLM 语义事实提取、确定性判定、CVSS v3.1 与证据加权置信度组合为一条可审计的检测流程。
 
@@ -27,8 +27,8 @@
 ### 1. 安装依赖
 
 ```bash
-git clone https://github.com/GG-Feng/go-vuln-workflow.git
-cd go-vuln-workflow
+git clone https://github.com/GG-Feng/Goferret.git
+cd Goferret/detector
 
 python3 -m venv .venv
 source .venv/bin/activate
