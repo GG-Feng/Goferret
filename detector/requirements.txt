@@ -1,8 +1,2 @@
-# Python dependencies for the Go vulnerability dataset pipeline.
-# All other imports used by the scripts are from the Python standard library
-# (json, os, sys, re, argparse, subprocess, shutil, hashlib, signal, tempfile,
-# concurrent.futures, collections, datetime). The .env file is parsed manually
-# by the scripts, so python-dotenv is intentionally NOT required.
-
-requests>=2.32,<3.0
-beautifulsoup4>=4.12,<5.0
+beautifulsoup4>=4.12,<5
+requests>=2.31,<3

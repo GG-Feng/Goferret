@@ -1,0 +1,102 @@
+{
+ "go_id": "GEN-CWE601-1",
+ "module_path": "generic",
+ "primary_domain": "NetworkRequestAndProtocolHandling",
+ "generic": true,
+ "references": [
+  "CWE-601 URL Redirection to Untrusted Site",
+  "OWASP Unvalidated Redirects and Forwards Cheat Sheet"
+ ],
+ "behavior_chain": {
+  "summary": "处理函数把请求参数中的目标 URL 用作重定向目标，只做了弱校验（例如只检查以 / 开头或只检查 scheme），未拒绝协议相对 URL（//host）、反斜杠形式或外部主机。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收带有 redirect/next/return_to 等参数的请求",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "extract_redirect_target",
+    "description": "读取重定向目标参数",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "r.URL.Query",
+      "r.FormValue"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: origin_validation",
+    "description": "在发出重定向之前，缺少对目标为站内相对路径（拒绝 //、/\\、外部主机）的校验",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复拒绝 // 与 /\\ 前缀、要求解析后 Host 为空或在允许列表内、或改为服务端映射的固定目标"
+    },
+    "missing_step_category": "origin_validation"
+   },
+   {
+    "step_id": 4,
+    "action": "issue_redirect",
+    "description": "向该目标发出 3xx 重定向",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "http.Redirect",
+      "c.Redirect"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 4
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "open_redirect",
+  "cwe_alignment": [
+   "CWE-601"
+  ],
+  "attack_vector": "攻击者构造指向外部站点的重定向参数",
+  "impact": "钓鱼、令牌泄露"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

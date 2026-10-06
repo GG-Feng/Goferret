@@ -1,0 +1,100 @@
+{
+ "go_id": "GEN-CWE362-1",
+ "module_path": "generic",
+ "primary_domain": "ConcurrencyStateAndSharedResourceManagement",
+ "generic": true,
+ "references": [
+  "CWE-367 TOCTOU Race Condition",
+  "CWE-362 Concurrent Execution using Shared Resource"
+ ],
+ "behavior_chain": {
+  "summary": "先检查某个条件（文件是否存在/在范围内、配额、状态），随后在没有持锁或原子操作的情况下执行依赖该条件的操作，中间窗口可被并发修改（TOCTOU）。",
+  "chain_type": "resource_lifecycle",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "check_condition",
+    "description": "检查前置条件（存在性、权限、计数、状态）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "os.Stat",
+      "os.Lstat"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "MISSING: state_synchronization",
+    "description": "在检查与使用之间，缺少锁/原子操作或同句柄操作来消除竞态窗口",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复用锁/原子操作把检查与使用合并，或改用在同一句柄上操作的 API（如 openat、O_NOFOLLOW、原子 rename）"
+    },
+    "missing_step_category": "state_synchronization"
+   },
+   {
+    "step_id": 3,
+    "action": "use_resource",
+    "description": "基于检查结果执行操作（打开/写入/递增）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 4,
+    "action": "release_or_return",
+    "description": "释放资源或返回结果",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 2
+  },
+  "exit_point": {
+   "step_id": 4
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "time_of_check_time_of_use",
+  "cwe_alignment": [
+   "CWE-362",
+   "CWE-367"
+  ],
+  "attack_vector": "并发请求或符号链接替换在检查与使用之间改变状态",
+  "impact": "竞态条件导致的绕过或损坏"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

@@ -1,0 +1,113 @@
+{
+ "go_id": "GEN-CWE862-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-862 Missing Authorization",
+  "OWASP Authorization Cheat Sheet"
+ ],
+ "behavior_chain": {
+  "summary": "处理函数执行特权或改变状态的操作前，只做了身份认证（或依赖上游中间件），没有检查调用者是否拥有执行该操作的权限（角色/权限/范围）。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "处理函数接收已认证或未认证的请求",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "authenticate_caller",
+    "description": "确定调用者身份（会话、令牌、证书），或假定中间件已完成认证",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "jwt.Parse",
+      "session.Get"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: access_control",
+    "description": "在执行特权或改变状态的操作前，缺少对调用者权限/角色/范围的检查",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复在执行操作前增加权限/角色/范围检查（如 RequirePermission、HasRole、CanAccess），失败返回 403"
+    },
+    "missing_step_category": "access_control"
+   },
+   {
+    "step_id": 4,
+    "action": "execute_privileged_action",
+    "description": "执行创建/删除/配置变更/管理类操作或读取敏感数据",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "return_http_response",
+    "description": "返回操作结果",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "missing_authorization_check",
+  "cwe_alignment": [
+   "CWE-862",
+   "CWE-285"
+  ],
+  "attack_vector": "任何已认证（甚至未认证）的调用者都能触发只应对特定角色开放的操作",
+  "impact": "权限提升、越权操作"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

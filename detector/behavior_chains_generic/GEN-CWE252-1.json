@@ -1,0 +1,98 @@
+{
+ "go_id": "GEN-CWE252-1",
+ "module_path": "generic",
+ "primary_domain": "InputParsingAndDeserialization",
+ "generic": true,
+ "references": [
+  "CWE-252 Unchecked Return Value",
+  "CWE-755 Improper Handling of Exceptional Conditions"
+ ],
+ "behavior_chain": {
+  "summary": "调用返回 (value, error) 的函数后忽略或未检查错误，继续使用零值/部分结果，导致安全判定基于无效数据（例如把验证失败当成功）。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "call_fallible_operation",
+    "description": "调用可能失败的解析/验证/查询操作",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "MISSING: error_handling",
+    "description": "在使用可能失败的操作的结果之前，缺少对错误返回值的检查与中止",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复检查错误并在失败时中止（返回错误/拒绝），不再使用返回的零值"
+    },
+    "missing_step_category": "error_handling"
+   },
+   {
+    "step_id": 3,
+    "action": "use_result_for_decision",
+    "description": "把结果用于授权判定、路径构造或后续操作",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 4,
+    "action": "return_response",
+    "description": "返回结果",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 2
+  },
+  "exit_point": {
+   "step_id": 4
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "unchecked_error_used_in_decision",
+  "cwe_alignment": [
+   "CWE-252",
+   "CWE-755",
+   "CWE-703"
+  ],
+  "attack_vector": "攻击者构造使操作失败的输入",
+  "impact": "安全判定失效、逻辑绕过"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

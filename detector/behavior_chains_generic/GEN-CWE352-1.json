@@ -1,0 +1,109 @@
+{
+ "go_id": "GEN-CWE352-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-352 Cross-Site Request Forgery",
+  "OWASP CSRF Prevention Cheat Sheet"
+ ],
+ "behavior_chain": {
+  "summary": "改变状态的请求依赖浏览器自动附带的凭据（cookie/基本认证）完成认证，缺少对请求来源的验证（CSRF token、Origin/Referer 校验、SameSite），导致跨站请求伪造。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收改变状态的请求（POST/PUT/DELETE 或带副作用的 GET）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "authenticate_by_cookie",
+    "description": "通过浏览器自动携带的 cookie 或基本认证确认用户",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: origin_validation",
+    "description": "在执行改变状态的操作之前，缺少对请求来源的验证（CSRF token / Origin / SameSite）",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复加入 CSRF token 校验、Origin/Referer 校验或 SameSite cookie 属性"
+    },
+    "missing_step_category": "origin_validation"
+   },
+   {
+    "step_id": 4,
+    "action": "execute_state_change",
+    "description": "执行修改/删除/配置变更",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "return_http_response",
+    "description": "返回结果",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "cross_site_request_forgery",
+  "cwe_alignment": [
+   "CWE-352"
+  ],
+  "attack_vector": "攻击者诱导已登录用户的浏览器向目标站发起请求",
+  "impact": "以受害者身份执行操作"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

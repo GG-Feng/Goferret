@@ -1,0 +1,222 @@
+{
+  "_doc": "v3 R3 strong/weak validation patterns per purpose. Regexes are matched against the text of calls and comparisons inside a validator function (ast_analyzer check_facts). General security knowledge only, never tailored to a project; every entry cites its public source. Frozen before the 5-repo evaluation.",
+  "purposes": {
+    "redirect": {
+      "category": "origin_validation",
+      "sinks": [
+        "redirect"
+      ],
+      "refs": [
+        "OWASP Unvalidated Redirects and Forwards Cheat Sheet",
+        "CWE-601",
+        "PortSwigger: open redirection (protocol-relative //host and /\\host bypasses)"
+      ],
+      "strong": [
+        {
+          "re": "HasPrefix\\([^,]+,\\s*\"//\"\\)",
+          "why": "rejects protocol-relative //host targets"
+        },
+        {
+          "re": "HasPrefix\\([^,]+,\\s*\"/\\\\\\\\\"\\)",
+          "why": "rejects /\\host targets that browsers normalise to //host"
+        },
+        {
+          "re": "HasPrefix\\([^,]+,\\s*`/\\\\`\\)",
+          "why": "rejects /\\host (raw string form)"
+        },
+        {
+          "re": "(?i)(allowed|allowlist|whitelist)\\w*\\(",
+          "why": "delegates to an allowlist check (OWASP: prefer an allowlist of targets)"
+        }
+      ],
+      "weak": [
+        {
+          "re": "HasPrefix\\([^,]+,\\s*\"/\"\\)",
+          "why": "a leading / also accepts //host"
+        },
+        {
+          "re": "\\.Scheme\\s*[!=]=",
+          "why": "scheme check alone leaves scheme-less //host"
+        },
+        {
+          "re": "\\.Host\\s*[!=]=",
+          "why": "host check on the parsed input does not constrain the emitted path"
+        },
+        {
+          "re": "url\\.Parse\\(",
+          "why": "parsing does not validate the target"
+        }
+      ]
+    },
+    "path": {
+      "category": "path_validation",
+      "sinks": [
+        "file_read",
+        "file_write"
+      ],
+      "refs": [
+        "CWE-22",
+        "OWASP Path Traversal",
+        "Go blog: Traversal-resistant file APIs (filepath.IsLocal, os.Root)"
+      ],
+      "strong": [
+        {
+          "re": "filepath\\.IsLocal\\(",
+          "why": "rejects absolute, .. and reserved names"
+        },
+        {
+          "re": "filepath\\.Rel\\(",
+          "why": "relative-to-base containment check"
+        },
+        {
+          "re": "SecureJoin\\(",
+          "why": "filepath-securejoin"
+        },
+        {
+          "re": "OpenRoot\\(|OpenInRoot\\(",
+          "why": "os.Root confinement"
+        },
+        {
+          "re": "HasPrefix\\(\\s*filepath\\.Clean\\(",
+          "why": "clean then prefix-compare against the base"
+        }
+      ],
+      "weak": [
+        {
+          "re": "Contains\\([^,]+,\\s*\"\\.\\.\"\\)",
+          "why": "substring .. check misses encoded and absolute forms"
+        },
+        {
+          "re": "filepath\\.Clean\\(|path\\.Clean\\(",
+          "why": "Clean alone does not confine to a base"
+        }
+      ]
+    },
+    "encoding": {
+      "category": "output_encoding",
+      "sinks": [
+        "html_injection",
+        "js_injection",
+        "query_exec"
+      ],
+      "refs": [
+        "CWE-79",
+        "CWE-90",
+        "OWASP XSS Prevention Cheat Sheet",
+        "OWASP LDAP Injection Prevention Cheat Sheet"
+      ],
+      "strong": [
+        {
+          "re": "html\\.EscapeString\\(|template\\.HTMLEscapeString\\(|template\\.JSEscapeString\\(",
+          "why": "context escaping"
+        },
+        {
+          "re": "url\\.QueryEscape\\(|url\\.PathEscape\\(",
+          "why": "URL component escaping"
+        },
+        {
+          "re": "ldap\\.EscapeFilter\\(|ldap\\.EscapeDN\\(",
+          "why": "LDAP filter / DN escaping"
+        },
+        {
+          "re": "bluemonday\\.",
+          "why": "HTML sanitizer policy"
+        }
+      ],
+      "weak": []
+    },
+    "input": {
+      "category": "input_sanitization",
+      "sinks": [
+        "command_execution",
+        "sql_query",
+        "sql_exec"
+      ],
+      "refs": [
+        "CWE-78",
+        "CWE-89",
+        "OWASP Input Validation Cheat Sheet (allowlist validation)"
+      ],
+      "strong": [
+        {
+          "re": "\\.MatchString\\(|\\.Match\\(",
+          "why": "allowlist pattern"
+        },
+        {
+          "re": "IndexAny\\(|ContainsAny\\(|IndexFunc\\(|ContainsFunc\\(|ContainsRune\\(",
+          "why": "character-class rejection"
+        }
+      ],
+      "weak": [
+        {
+          "re": "Contains\\(",
+          "why": "denylist substring check"
+        }
+      ]
+    },
+    "url_field": {
+      "category": "input_sanitization",
+      "sinks": [],
+      "inferred_from_names": "(?i)url|uri|href|link",
+      "refs": [
+        "OWASP Input Validation Cheat Sheet (validating URLs)",
+        "CWE-20",
+        "CWE-79 (attribute injection via quotes / whitespace in URLs)"
+      ],
+      "strong": [
+        {
+          "re": "IndexAny\\(|ContainsAny\\(|IndexFunc\\(|ContainsFunc\\(|ContainsRune\\(",
+          "why": "character-class rejection (quotes, <>, whitespace)"
+        },
+        {
+          "re": "\\.MatchString\\(|\\.Match\\(",
+          "why": "allowlist pattern"
+        },
+        {
+          "re": "html\\.EscapeString\\(|url\\.QueryEscape\\(|url\\.PathEscape\\(",
+          "why": "escaping"
+        }
+      ],
+      "weak": [
+        {
+          "re": "url\\.Parse\\(|url\\.ParseRequestURI\\(",
+          "why": "Go's URL parser accepts quotes and many unsafe characters"
+        },
+        {
+          "re": "\\.Scheme\\s*[!=]=|\\.IsAbs\\(",
+          "why": "scheme / absoluteness only"
+        }
+      ]
+    },
+    "outbound": {
+      "category": "input_sanitization",
+      "sinks": [
+        "http_request"
+      ],
+      "refs": [
+        "OWASP Server-Side Request Forgery Prevention Cheat Sheet",
+        "CWE-918"
+      ],
+      "strong": [
+        {
+          "re": "\\.IsPrivate\\(|\\.IsLoopback\\(|\\.IsLinkLocalUnicast\\(|\\.IsUnspecified\\(|\\.IsGlobalUnicast\\(",
+          "why": "rejects internal / loopback / link-local destinations after resolution"
+        },
+        {
+          "re": "(?i)(allowed|allowlist|whitelist)\\w*\\(",
+          "why": "destination allowlist (OWASP: preferred defence)"
+        }
+      ],
+      "weak": [
+        {
+          "re": "url\\.Parse\\(|url\\.ParseRequestURI\\(",
+          "why": "parsing does not constrain the destination"
+        },
+        {
+          "re": "\\.Scheme\\s*[!=]=",
+          "why": "scheme check alone still reaches internal hosts"
+        }
+      ]
+    }
+  }
+}

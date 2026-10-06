@@ -16,12 +16,20 @@ def find_analyzer_binary():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     analyzer_dir = os.path.join(script_dir, 'ast_analyzer')
 
-    # Check for existing binary
-    binary = os.path.join(analyzer_dir, 'ast_analyzer.exe')
-    if not os.path.isfile(binary):
-        binary = os.path.join(analyzer_dir, 'ast_analyzer')
+    # Check for an existing binary, preferring the one built for this platform.
+    # A leftover ast_analyzer.exe from a Windows build must not shadow the
+    # native binary on POSIX, so also require the executable bit.
+    names = (('ast_analyzer.exe', 'ast_analyzer') if os.name == 'nt'
+             else ('ast_analyzer', 'ast_analyzer.exe'))
+    binary = None
+    for name in names:
+        candidate = os.path.join(analyzer_dir, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            binary = candidate
+            break
 
-    if not os.path.isfile(binary):
+    if binary is None:
+        binary = os.path.join(analyzer_dir, 'ast_analyzer')
         # Try to build it
         go_path = _find_go()
         if go_path:

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -29,7 +30,36 @@ type AnalysisResult struct {
 	StdlibSignals       []StdlibSignal          `json:"stdlib_signals"`
 	ConcurrencyPatterns []ConcurrencyPattern    `json:"concurrency_patterns"`
 	Functions           []FuncDef               `json:"functions,omitempty"`
-	ParseMode           string                  `json:"parse_mode"`
+	// v3 R1: size-sensitive sinks and range checks on numerically parsed values.
+	// Kept out of DataFlowIndicators so the v2 decision path is unaffected.
+	SizeFlows []SizeFlow `json:"size_flows,omitempty"`
+	// v3 R2: per-function parameter/call-site taint facts (see param_flow.go).
+	ParamFlows []ParamFlow `json:"param_flows,omitempty"`
+	// v4: struct types with field tags (decoded data), for the wire-parameter lookup.
+	WireTypes []WireType `json:"wire_types,omitempty"`
+	ParseMode  string      `json:"parse_mode"`
+}
+
+// SizeFlow (v3 R1): per function, sinks where a numerically parsed value is used as an
+// allocation length or an index, and relational comparisons on those values.
+type SizeFlow struct {
+	Function    string       `json:"function"`
+	File        string       `json:"file"`
+	SizeSinks   []SizeSink   `json:"size_sinks"`
+	RangeChecks []RangeCheck `json:"range_checks,omitempty"`
+}
+
+type SizeSink struct {
+	Line    int    `json:"line"`
+	Type    string `json:"type"` // alloc_size | index_access
+	Var     string `json:"var"`
+	Pattern string `json:"pattern"`
+}
+
+type RangeCheck struct {
+	Line    int    `json:"line"`
+	Var     string `json:"var"`
+	Pattern string `json:"pattern"`
 }
 
 type FileImports struct {
@@ -41,6 +71,7 @@ type FileImports struct {
 type FuncDef struct {
 	Name     string   `json:"name"`
 	Receiver string   `json:"receiver,omitempty"`
+	QName    string   `json:"qname,omitempty"` // 方法为 "Recv.Name"，与 data flow / call chain 的 function 字段一致
 	File     string   `json:"file"`
 	Line     int      `json:"line"`
 	Calls    []string `json:"calls,omitempty"`
@@ -60,16 +91,23 @@ type CallEntry struct {
 }
 
 type DataFlowIndicator struct {
-	Function string      `json:"function"`
-	File     string      `json:"file"`
-	Sources  []FlowPoint `json:"sources"`
-	Sinks    []FlowPoint `json:"sinks"`
+	Function   string           `json:"function"`
+	File       string           `json:"file"`
+	Sources    []FlowPoint      `json:"sources"`
+	Sinks      []FlowPoint      `json:"sinks"`
+	Sanitizers []SanitizerPoint `json:"sanitizers,omitempty"`
 }
 
 type FlowPoint struct {
 	Line    int    `json:"line"`
 	Pattern string `json:"pattern"`
 	Type    string `json:"type"`
+}
+
+type SanitizerPoint struct {
+	Line     int    `json:"line"`
+	Pattern  string `json:"pattern"`
+	Category string `json:"category"`
 }
 
 type StdlibSignal struct {
@@ -295,52 +333,162 @@ type importMap struct {
 	aliases map[string]string // alias or package name -> import path
 }
 
-// Source/sink patterns for data flow detection
-var sourcePatterns = []struct {
-	pattern string
-	fType   string
-}{
-	{".Read(", "read"},
-	{".ReadAll(", "read_all"},
-	{".Recv(", "channel_recv"},
-	{".Accept(", "network_accept"},
-	{".ReadMessage(", "read_message"},
-	{".ReadTCP(", "network_read"},
-	{".ReadUDP(", "network_read"},
-	{"http.Request", "http_request"},
-	{".Body", "http_body"},
-	{"bufio.NewReader(", "buffered_read"},
-	{"json.Unmarshal(", "json_decode"},
-	{"json.Decode(", "json_decode"},
-	{"xml.Unmarshal(", "xml_decode"},
-	{"binary.Read(", "binary_read"},
-	{".Scan(", "scan"},
-	{"io.Copy(", "io_copy"},
-	{"io.CopyN(", "io_copy"},
+// flowPattern is a source/sink API matched by substring against the text
+// form of each AST node. gateImports optionally restricts the pattern to
+// files importing one of the given module paths: receiver-name patterns
+// like "c.Query(" only read an HTTP parameter inside gin/echo/beego files —
+// elsewhere the same receiver could be a *sql.DB or context.Context.
+type flowPattern struct {
+	pattern     string
+	fType       string
+	gateImports []string
 }
 
-var sinkPatterns = []struct {
-	pattern string
-	fType   string
+// Import gates for receiver-name patterns. Gates are module roots: a gate
+// matches the exact path or any subpackage under it, so gateEcho covers
+// both github.com/labstack/echo and .../echo/v4, and gateBeego covers
+// beego's server/web context subpackage. Subpackage imports also let a
+// framework's own source through (gin imports gin/internal/...), which is
+// correct: inside the framework, c.Status( really is a response write.
+var (
+	gateGin     = []string{"github.com/gin-gonic/gin"}
+	gateEcho    = []string{"github.com/labstack/echo"}
+	gateGinEcho = []string{"github.com/gin-gonic/gin", "github.com/labstack/echo"}
+	gateBeego   = []string{"github.com/beego/beego/v2", "github.com/astaxie/beego"}
+	gateMux     = []string{"github.com/gorilla/mux"}
+)
+
+// Source/sink patterns for data flow detection
+var sourcePatterns = []flowPattern{
+	{".Read(", "read", nil},
+	{".ReadAll(", "read_all", nil},
+	{".Recv(", "channel_recv", nil},
+	{".Accept(", "network_accept", nil},
+	{".ReadMessage(", "read_message", nil},
+	{".ReadTCP(", "network_read", nil},
+	{".ReadUDP(", "network_read", nil},
+	{"http.Request", "http_request", nil},
+	{".Body", "http_body", nil},
+	{"bufio.NewReader(", "buffered_read", nil},
+	{"bufio.NewScanner(", "buffered_read", nil},
+	{"json.Unmarshal(", "json_decode", nil},
+	{"json.Decode(", "json_decode", nil},
+	{"xml.Unmarshal(", "xml_decode", nil},
+	{"binary.Read(", "binary_read", nil},
+	{".Scan(", "scan", nil},
+	{"io.Copy(", "io_copy", nil},
+	{"io.CopyN(", "io_copy", nil},
+	{"json.NewDecoder(", "json_decode", nil},
+	{"xml.NewDecoder(", "xml_decode", nil},
+	{"yaml.Unmarshal(", "json_decode", nil},
+	{"URL.Query(", "http_request", nil},
+	// Web framework context reads (receiver-name patterns, import-gated).
+	// r.FormValue needs no gate: the method is unique to *http.Request.
+	{"c.QueryParam(", "http_request", gateEcho},
+	{"c.Param(", "http_request", gateGinEcho},
+	{"c.Query(", "http_request", gateGin},
+	{"c.FormFile(", "http_request", gateGin},
+	{"c.ShouldBind(", "http_request", gateGin},
+	{"c.ShouldBindJSON(", "http_request", gateGin},
+	{"c.Bind(", "http_request", gateGinEcho},
+	{"c.BindJSON(", "http_request", gateGin},
+	{"ctx.Query(", "http_request", gateBeego},
+	{"r.FormValue(", "http_request", nil},
+	// Header, cookie and route params are attacker-controlled request input
+	// just as much as query and form values. Without these a handler that
+	// only reads a header has no data flow at all and the flow gate skips
+	// it, so nothing downstream ever looks at it.
+	{"r.Header.Get(", "http_request", nil},
+	{"r.Cookie(", "http_request", nil},
+	{"mux.Vars(", "http_request", gateMux},
+}
+
+var sinkPatterns = []flowPattern{
+	{"exec.Command(", "command_execution", nil},
+	{"os.Create(", "file_write", nil},
+	{"os.Open(", "file_read", nil},
+	{"os.OpenFile(", "file_write", nil},
+	{"os.WriteFile(", "file_write", nil},
+	{"filepath.Join(", "path_construction", nil},
+	{"sql.Query(", "sql_query", nil},
+	{"sql.Exec(", "sql_exec", nil},
+	{"sql.QueryRow(", "sql_query", nil},
+	{"http.Get(", "http_request", nil},
+	{"http.Post(", "http_request", nil},
+	{"template.HTML(", "html_injection", nil},
+	{"template.JS(", "js_injection", nil},
+	{"json.Marshal(", "json_encode", nil},
+	{"fmt.Sprintf(", "string_format", nil},
+	{"fmt.Sprintf(", "string_format", nil},
+	{".Write(", "write", nil},
+	{".WriteString(", "write", nil},
+	{"os.MkdirAll(", "file_write", nil},
+	{"os.Stat(", "file_read", nil},
+	{"path.Join(", "path_construction", nil},
+	{"os.ReadFile(", "file_read", nil},
+	{"ioutil.ReadFile(", "file_read", nil},
+	{"os.Chmod(", "file_write", nil},
+	{"os.Rename(", "file_write", nil},
+	{"os.RemoveAll(", "file_write", nil},
+	{"exec.CommandContext(", "command_execution", nil},
+	{"http.NewRequest(", "http_request", nil},
+	{"w.Header(", "write", nil},
+	// Web framework context response writes (receiver-name, import-gated)
+	{"c.JSON(", "write", gateGinEcho},
+	{"c.String(", "write", gateGinEcho},
+	{"c.Status(", "write", gateGinEcho},
+	{"c.Header(", "write", gateGinEcho},
+}
+
+// Sanitizer patterns: security-check APIs. When one sits between a source
+// and a sink of the same data flow, the span is protected for that
+// missing_step_category. bounds_check / error_handling / protocol_validation
+// have no reliable API-level signal and are intentionally absent.
+var sanitizerPatterns = []struct {
+	pattern  string
+	category string
 }{
-	{"exec.Command(", "command_execution"},
-	{"os.Create(", "file_write"},
-	{"os.Open(", "file_read"},
-	{"os.OpenFile(", "file_write"},
-	{"os.WriteFile(", "file_write"},
-	{"filepath.Join(", "path_construction"},
-	{"sql.Query(", "sql_query"},
-	{"sql.Exec(", "sql_exec"},
-	{"sql.QueryRow(", "sql_query"},
-	{"http.Get(", "http_request"},
-	{"http.Post(", "http_request"},
-	{"template.HTML(", "html_injection"},
-	{"template.JS(", "js_injection"},
-	{"json.Marshal(", "json_encode"},
-	{"fmt.Sprintf(", "string_format"},
-	{"fmt.Sprintf(", "string_format"},
-	{".Write(", "write"},
-	{".WriteString(", "write"},
+	{"filepath.Clean(", "path_validation"},
+	{"filepath.IsLocal(", "path_validation"},
+	{"path.Clean(", "path_validation"},
+	{"html.EscapeString(", "output_encoding"},
+	{"template.HTMLEscapeString(", "output_encoding"},
+	{"url.QueryEscape(", "output_encoding"},
+	{"url.PathEscape(", "output_encoding"},
+	{"strconv.Quote(", "output_encoding"},
+	{".MatchString(", "input_sanitization"},
+	{"strconv.Atoi(", "input_sanitization"},
+	{"strconv.ParseInt(", "input_sanitization"},
+	{"strconv.ParseFloat(", "input_sanitization"},
+	{"validator.New(", "input_sanitization"},
+	{"io.LimitReader(", "resource_limit"},
+	{"http.MaxBytesReader(", "resource_limit"},
+	{"context.WithTimeout(", "resource_limit"},
+	{"context.WithDeadline(", "resource_limit"},
+	{"csrf.Protect(", "origin_validation"},
+	{"SameSite", "origin_validation"},
+	{".AllowOrigins(", "origin_validation"},
+	{".Enforce(", "access_control"},
+	{"ed25519.Verify(", "cryptographic_verification"},
+	{"ecdsa.Verify(", "cryptographic_verification"},
+	{"rsa.VerifyPKCS1v15(", "cryptographic_verification"},
+	{"rsa.VerifyPSS(", "cryptographic_verification"},
+	{"hmac.Equal(", "cryptographic_verification"},
+	{"subtle.ConstantTimeCompare(", "cryptographic_verification"},
+	{"cert.Verify(", "cryptographic_verification"},
+	{"jwt.Parse(", "identity_verification"},
+	{"jwt.ParseWithClaims(", "identity_verification"},
+	{"bcrypt.CompareHashAndPassword(", "identity_verification"},
+	{"atomic.CompareAndSwap(", "state_synchronization"},
+	{"atomic.Load", "state_synchronization"},
+	{"atomic.Store", "state_synchronization"},
+	{".Lock(", "state_synchronization"},
+	{"filepath.Base(", "path_validation"},
+	{"filepath.Dir(", "path_validation"},
+	{"strconv.ParseUint(", "input_sanitization"},
+	{"bluemonday.NewPolicy(", "output_encoding"},
+	{"strings.HasPrefix(", "path_validation"},
+	{"strings.Contains(", "input_sanitization"},
 }
 
 // ── Analysis ──────────────────────────────────────────────────────────────
@@ -349,7 +497,25 @@ func main() {
 	dir := flag.String("dir", ".", "Source directory to analyze")
 	focusFuncs := flag.String("focus-funcs", "", "Comma-separated function names to focus on")
 	focusFiles := flag.String("focus-files", "", "Comma-separated file paths to focus on")
+	guardsFile := flag.String("guards", "", "Guard-chain mode: file path relative to --dir")
+	guardFunc := flag.String("guard-func", "", "Guard-chain mode: function name")
+	guardLine := flag.Int("guard-line", 0, "Guard-chain mode: stop at this line (0 = whole function)")
 	flag.Parse()
+
+	if *guardsFile != "" {
+		gr, err := extractGuards(*dir, *guardsFile, *guardFunc, *guardLine)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(gr); err != nil {
+			fmt.Fprintf(os.Stderr, "JSON encode error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	var fFuncs, fFiles []string
 	if *focusFuncs != "" {
@@ -559,6 +725,13 @@ func analyzeDir(dir string, focusFuncs, focusFiles []string) (*AnalysisResult, e
 	// Step 6: Extract concurrency patterns for focus functions
 	result.ConcurrencyPatterns = extractConcurrency(fset, files, focusFuncs)
 
+	// Step 7 (v3 R1): size-sensitive sinks on numerically parsed values
+	result.SizeFlows = extractSizeFlows(fset, files, focusFuncs)
+
+	// Step 8 (v3 R2): parameter taint facts for inter-procedural propagation
+	result.ParamFlows = extractParamFlows(fset, files, focusFuncs)
+	result.WireTypes = collectWireTypes(files)
+
 	// Store function list (only for focus files)
 	result.Functions = filterFuncDefs(allFuncs, focusFuncs, focusSet)
 	result.ParseMode = "parser"
@@ -570,7 +743,16 @@ func analyzeDir(dir string, focusFuncs, focusFiles []string) (*AnalysisResult, e
 func parseFilesLenient(fset *token.FileSet, dir string) (map[string]*ast.Package, error) {
 	pkgs := make(map[string]*ast.Package)
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if path != dir && (info.Name() == "vendor" || info.Name() == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -644,6 +826,7 @@ func isStdlib(importPath string) bool {
 type funcDefInfo struct {
 	Name     string
 	Receiver string // e.g., "*Conn"
+	QName    string // "Recv.Name" for methods, else Name
 	File     string
 	Line     int
 	Node     ast.Node // *ast.FuncDecl or *ast.FuncLit
@@ -662,6 +845,7 @@ func extractFuncDefs(fset *token.FileSet, files []fileInfo) []funcDefInfo {
 			case *ast.FuncDecl:
 				def := funcDefInfo{
 					Name:    d.Name.Name,
+					QName:   qualName(d),
 					File:    fi.relPath,
 					Line:    fset.Position(d.Pos()).Line,
 					Node:    d,
@@ -700,6 +884,43 @@ func extractFuncDefs(fset *token.FileSet, files []fileInfo) []funcDefInfo {
 	return defs
 }
 
+// recvBase 返回方法接收者的类型名（去掉指针与泛型参数）；非方法返回 ""
+func recvBase(fd *ast.FuncDecl) string {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return ""
+	}
+	t := fd.Recv.List[0].Type
+	if s, ok := t.(*ast.StarExpr); ok {
+		t = s.X
+	}
+	switch x := t.(type) {
+	case *ast.IndexExpr:
+		t = x.X
+	case *ast.IndexListExpr:
+		t = x.X
+	}
+	if id, ok := t.(*ast.Ident); ok {
+		return id.Name
+	}
+	return ""
+}
+
+// qualName 给方法加上接收者类型前缀，避免同一文件内不同类型的同名方法互相覆盖
+func qualName(fd *ast.FuncDecl) string {
+	if r := recvBase(fd); r != "" {
+		return r + "." + fd.Name.Name
+	}
+	return fd.Name.Name
+}
+
+// bareName 去掉 qualName 加的接收者前缀（focus 过滤仍按裸函数名）
+func bareName(n string) string {
+	if i := strings.LastIndex(n, "."); i >= 0 {
+		return n[i+1:]
+	}
+	return n
+}
+
 func receiverType(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.StarExpr:
@@ -735,6 +956,7 @@ func filterFuncDefs(defs []funcDefInfo, focusFuncs []string, focusFiles map[stri
 		fd := FuncDef{
 			Name:     d.Name,
 			Receiver: d.Receiver,
+			QName:    d.QName,
 			File:     d.File,
 			Line:     d.Line,
 		}
@@ -783,7 +1005,7 @@ func extractCallChains(fset *token.FileSet, files []fileInfo, allFuncs []funcDef
 			}
 
 			iterFuncDecls(fi, func(v funcVisitor) {
-				if len(focusFuncs) > 0 && !focusSet[v.name] {
+				if len(focusFuncs) > 0 && !focusSet[bareName(v.name)] {
 					return
 				}
 
@@ -964,6 +1186,36 @@ func extractStdlibSignals(imports map[string]*FileImports) []StdlibSignal {
 
 // ── Data flow indicator extraction ────────────────────────────────────────
 
+// gatePatterns filters patterns down to those whose import gate (if any) is
+// satisfied by the file's imports. An empty gate list means "always active".
+func gatePatterns(patterns []flowPattern, fileImports map[string]bool) []flowPattern {
+	active := make([]flowPattern, 0, len(patterns))
+	for _, p := range patterns {
+		if importGateSatisfied(fileImports, p.gateImports) {
+			active = append(active, p)
+		}
+	}
+	return active
+}
+
+// importGateSatisfied reports whether the gate is satisfied: either the
+// pattern is ungated, or the file imports one of the gate paths or a
+// subpackage under it. The "/" suffix keeps github.com/labstack/echo from
+// matching github.com/labstack/echo-middleware.
+func importGateSatisfied(fileImports map[string]bool, gate []string) bool {
+	if len(gate) == 0 {
+		return true
+	}
+	for imported := range fileImports {
+		for _, g := range gate {
+			if imported == g || strings.HasPrefix(imported, g+"/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func extractDataFlow(fset *token.FileSet, files []fileInfo, focusFuncs []string) []DataFlowIndicator {
 	focusSet := make(map[string]bool)
 	for _, f := range focusFuncs {
@@ -977,12 +1229,22 @@ func extractDataFlow(fset *token.FileSet, files []fileInfo, focusFuncs []string)
 			continue
 		}
 
+		// Receiver-name patterns (c.Query( etc.) are gated on the file's
+		// imports so they only fire inside the framework they belong to.
+		fileImports := make(map[string]bool)
+		for _, imp := range fi.file.Imports {
+			fileImports[strings.Trim(imp.Path.Value, `"`)] = true
+		}
+		activeSources := gatePatterns(sourcePatterns, fileImports)
+		activeSinks := gatePatterns(sinkPatterns, fileImports)
+
 		iterFuncDecls(fi, func(v funcVisitor) {
-			if len(focusFuncs) > 0 && !focusSet[v.name] {
+			if len(focusFuncs) > 0 && !focusSet[bareName(v.name)] {
 				return
 			}
 
 			var sources, sinks []FlowPoint
+			var sanitizers []SanitizerPoint
 
 			ast.Inspect(v.body, func(n ast.Node) bool {
 				if n == nil {
@@ -999,7 +1261,7 @@ func extractDataFlow(fset *token.FileSet, files []fileInfo, focusFuncs []string)
 				}
 
 				// Check source patterns
-				for _, sp := range sourcePatterns {
+				for _, sp := range activeSources {
 					if strings.Contains(code, sp.pattern) {
 						sources = append(sources, FlowPoint{
 							Line:    line,
@@ -1011,7 +1273,7 @@ func extractDataFlow(fset *token.FileSet, files []fileInfo, focusFuncs []string)
 				}
 
 				// Check sink patterns
-				for _, sk := range sinkPatterns {
+				for _, sk := range activeSinks {
 					if strings.Contains(code, sk.pattern) {
 						sinks = append(sinks, FlowPoint{
 							Line:    line,
@@ -1022,15 +1284,28 @@ func extractDataFlow(fset *token.FileSet, files []fileInfo, focusFuncs []string)
 					}
 				}
 
+				// Check sanitizer patterns
+				for _, sa := range sanitizerPatterns {
+					if strings.Contains(code, sa.pattern) {
+						sanitizers = append(sanitizers, SanitizerPoint{
+							Line:     line,
+							Pattern:  code,
+							Category: sa.category,
+						})
+						break
+					}
+				}
+
 				return true
 			})
 
 			if len(sources) > 0 || len(sinks) > 0 {
 				indicators = append(indicators, DataFlowIndicator{
-					Function: v.name,
-					File:     v.file,
-					Sources:  sources,
-					Sinks:    sinks,
+					Function:   v.name,
+					File:       v.file,
+					Sources:    sources,
+					Sinks:      sinks,
+					Sanitizers: sanitizers,
 				})
 			}
 		})
@@ -1055,7 +1330,7 @@ func extractConcurrency(fset *token.FileSet, files []fileInfo, focusFuncs []stri
 		}
 
 		iterFuncDecls(fi, func(v funcVisitor) {
-			if len(focusFuncs) > 0 && !focusSet[v.name] {
+			if len(focusFuncs) > 0 && !focusSet[bareName(v.name)] {
 				return
 			}
 
@@ -1115,7 +1390,7 @@ func iterFuncDecls(fi fileInfo, visit func(v funcVisitor)) {
 				continue
 			}
 			visit(funcVisitor{
-				name: d.Name.Name,
+				name: qualName(d),
 				body: d.Body,
 				file: fi.relPath,
 			})
@@ -1185,4 +1460,455 @@ func exprToString(expr ast.Node) string {
 	default:
 		return ""
 	}
+}
+
+// ── Guard-chain extraction (`--guards`) ──────────────────────────────
+//
+// A function's early returns between its entry and a reported line are the
+// specification of what must hold for that line to execute. Handing an
+// experiment designer that list — instead of letting it guess and see only a
+// status code when it guesses wrong — is what makes a stateful scenario
+// testable. Kept in its own subcommand so the detection pipeline's output is
+// untouched.
+
+type Guard struct {
+	Line      int      `json:"line"`
+	Condition string   `json:"condition"`
+	Returns   string   `json:"returns"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	Kind      string   `json:"kind"`
+}
+
+type GuardResult struct {
+	File      string  `json:"file"`
+	Function  string  `json:"function"`
+	FuncStart int     `json:"func_start"`
+	FuncEnd   int     `json:"func_end"`
+	TargetentLine int `json:"target_line"`
+	Guards    []Guard `json:"guards"`
+}
+
+// exprText renders a node back to source, trimmed to keep output readable.
+func exprText(fset *token.FileSet, n ast.Node) string {
+	if n == nil {
+		return ""
+	}
+	var buf strings.Builder
+	if err := printer.Fprint(&buf, fset, n); err != nil {
+		return ""
+	}
+	s := strings.Join(strings.Fields(buf.String()), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// statusOf names the HTTP status (or error form) a return statement yields.
+func statusOf(fset *token.FileSet, ret *ast.ReturnStmt) string {
+	if ret == nil || len(ret.Results) == 0 {
+		return "return"
+	}
+	first := exprText(fset, ret.Results[0])
+	if strings.HasPrefix(first, "http.Status") {
+		return strings.TrimPrefix(first, "http.")
+	}
+	return first
+}
+
+// callsIn lists the selector-style calls an expression performs, e.g.
+// "cache.GetLength" or "d.Check" — the state a guard depends on.
+func callsIn(fset *token.FileSet, n ast.Node) []string {
+	seen := map[string]bool{}
+	var out []string
+	ast.Inspect(n, func(node ast.Node) bool {
+		switch v := node.(type) {
+		case *ast.CallExpr:
+			if sel, ok := v.Fun.(*ast.SelectorExpr); ok {
+				name := exprText(fset, sel)
+				if name != "" && !seen[name] {
+					seen[name] = true
+					out = append(out, name)
+				}
+			}
+		case *ast.SelectorExpr:
+			name := exprText(fset, v)
+			if strings.Count(name, ".") >= 2 && !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// returnsWithin reports whether the statement contains a return of its own.
+func returnsWithin(n ast.Node) bool {
+	found := false
+	ast.Inspect(n, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		switch node.(type) {
+		case *ast.ReturnStmt:
+			found = true
+			return false
+		case *ast.FuncLit:
+			return false // a nested closure's return is not this one's
+		}
+		return true
+	})
+	return found
+}
+
+func extractGuards(dir, relFile, funcName string, targetLine int) (*GuardResult, error) {
+	fset := token.NewFileSet()
+	path := filepath.Join(dir, relFile)
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+
+	var target ast.Node
+	var body *ast.BlockStmt
+	ast.Inspect(file, func(n ast.Node) bool {
+		fd, ok := n.(*ast.FuncDecl)
+		if !ok || fd.Name == nil || fd.Name.Name != funcName || fd.Body == nil {
+			return true
+		}
+		target, body = fd, fd.Body
+		return false
+	})
+	if body == nil {
+		return nil, fmt.Errorf("function %s not found in %s", funcName, relFile)
+	}
+
+	res := &GuardResult{
+		File: relFile, Function: funcName,
+		FuncStart: fset.Position(target.Pos()).Line,
+		FuncEnd:   fset.Position(target.End()).Line,
+		TargetentLine: targetLine,
+		Guards:    []Guard{},
+	}
+	limit := targetLine
+	if limit <= 0 {
+		limit = res.FuncEnd
+	}
+
+	add := func(line int, cond, ret, kind string, deps []string) {
+		if line < res.FuncStart || line > limit {
+			return
+		}
+		res.Guards = append(res.Guards, Guard{
+			Line: line, Condition: cond, Returns: ret, Kind: kind, DependsOn: deps,
+		})
+	}
+
+	// `x, err := call(); if err != nil { return ... }` is the dominant Go
+	// idiom, and it puts the call one statement *above* the guard. Reading only
+	// the condition yields a bare `err != nil` with no dependencies, which
+	// hides exactly the state lookups worth knowing about — so each block
+	// remembers what its preceding statements assigned.
+	// Keyed by variable *and* line: `err` is reassigned throughout a function,
+	// so a guard must resolve to the assignment directly above it, not to
+	// whichever one the traversal happened to visit last.
+	type assign struct {
+		line  int
+		calls []string
+	}
+	assignedBy := map[string][]assign{}
+	recordAssign := func(st ast.Stmt) {
+		as, ok := st.(*ast.AssignStmt)
+		if !ok {
+			return
+		}
+		var calls []string
+		for _, rhs := range as.Rhs {
+			calls = append(calls, callsIn(fset, rhs)...)
+		}
+		if len(calls) == 0 {
+			return
+		}
+		line := fset.Position(as.Pos()).Line
+		for _, lhs := range as.Lhs {
+			if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+				assignedBy[id.Name] = append(assignedBy[id.Name], assign{line, calls})
+			}
+		}
+	}
+	var walkStmts func(list []ast.Stmt)
+	walkStmts = func(list []ast.Stmt) {
+		for _, st := range list {
+			recordAssign(st)
+			switch b := st.(type) {
+			case *ast.IfStmt:
+				if b.Init != nil {
+					recordAssign(b.Init)
+				}
+			case *ast.BlockStmt:
+				walkStmts(b.List)
+			case *ast.ExprStmt:
+				if call, ok := b.X.(*ast.CallExpr); ok {
+					if fl, ok := call.Fun.(*ast.FuncLit); ok && fl.Body != nil {
+						walkStmts(fl.Body.List)
+					}
+				}
+			case *ast.ReturnStmt:
+				for _, r := range b.Results {
+					if call, ok := r.(*ast.CallExpr); ok {
+						for _, a := range call.Args {
+							if fl, ok := a.(*ast.FuncLit); ok && fl.Body != nil {
+								walkStmts(fl.Body.List)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	walkStmts(body.List)
+
+	// Dependencies of a guard: what its condition calls, plus what produced any
+	// variable it tests.
+	depsFor := func(cond ast.Expr) []string {
+		at := fset.Position(cond.Pos()).Line
+		seen := map[string]bool{}
+		var out []string
+		push := func(vals []string) {
+			for _, v := range vals {
+				if v != "" && !seen[v] {
+					seen[v] = true
+					out = append(out, v)
+				}
+			}
+		}
+		push(callsIn(fset, cond))
+		ast.Inspect(cond, func(node ast.Node) bool {
+			id, ok := node.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			best := -1
+			var calls []string
+			for _, a := range assignedBy[id.Name] {
+				if a.line <= at && a.line > best {
+					best, calls = a.line, a.calls
+				}
+			}
+			push(calls)
+			return true
+		})
+		return out
+	}
+
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.IfStmt:
+			if v.Body != nil && returnsWithin(v.Body) {
+				var ret string
+				for _, st := range v.Body.List {
+					if r, ok := st.(*ast.ReturnStmt); ok {
+						ret = statusOf(fset, r)
+						break
+					}
+				}
+				add(fset.Position(v.Cond.Pos()).Line, exprText(fset, v.Cond), ret,
+					"if", depsFor(v.Cond))
+			}
+		case *ast.SwitchStmt:
+			for _, c := range v.Body.List {
+				cc, ok := c.(*ast.CaseClause)
+				if !ok || len(cc.Body) == 0 {
+					continue
+				}
+				var ret string
+				for _, st := range cc.Body {
+					if r, ok := st.(*ast.ReturnStmt); ok {
+						ret = statusOf(fset, r)
+						break
+					}
+				}
+				if ret == "" {
+					continue
+				}
+				var conds []string
+				var deps []string
+				for _, e := range cc.List {
+					conds = append(conds, exprText(fset, e))
+					deps = append(deps, depsFor(e)...)
+				}
+				cond := strings.Join(conds, " | ")
+				if cond == "" {
+					cond = "default"
+				}
+				add(fset.Position(cc.Pos()).Line, cond, ret, "switch-case", deps)
+			}
+		}
+		return true
+	})
+
+	sort.Slice(res.Guards, func(i, j int) bool { return res.Guards[i].Line < res.Guards[j].Line })
+	return res, nil
+}
+
+// ── v3 R1: size-sensitive sinks ───────────────────────────────────────────
+//
+// A value parsed from text or bytes (strconv.Atoi, binary.BigEndian.Uint32, ...) and
+// then used as an allocation length (make) or an index is the classic
+// "attacker-controlled size" pattern (CWE-789 / CWE-129). Variables are tracked by
+// name inside one function body: seeded by numeric-parse calls, then propagated
+// through assignments whose right-hand side references a tracked variable.
+
+var numericParseFuncs = []string{
+	"strconv.Atoi", "strconv.ParseInt", "strconv.ParseUint",
+	"binary.BigEndian.Uint16", "binary.BigEndian.Uint32", "binary.BigEndian.Uint64",
+	"binary.LittleEndian.Uint16", "binary.LittleEndian.Uint32", "binary.LittleEndian.Uint64",
+	"binary.Uvarint", "binary.Varint", "binary.ReadUvarint", "binary.ReadVarint",
+}
+
+func isNumericParseCall(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	name := exprToString(call.Fun)
+	for _, f := range numericParseFuncs {
+		if name == f {
+			return true
+		}
+	}
+	return false
+}
+
+// identsIn returns the identifier names referenced by an expression.
+func identsIn(e ast.Node) map[string]bool {
+	out := map[string]bool{}
+	if e == nil {
+		return out
+	}
+	ast.Inspect(e, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name != "_" {
+			out[id.Name] = true
+		}
+		return true
+	})
+	return out
+}
+
+func firstTracked(e ast.Node, tracked map[string]bool) string {
+	names := identsIn(e)
+	keys := make([]string, 0, len(names))
+	for k := range names {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if tracked[k] {
+			return k
+		}
+	}
+	return ""
+}
+
+func extractSizeFlows(fset *token.FileSet, files []fileInfo, focusFuncs []string) []SizeFlow {
+	focusSet := make(map[string]bool)
+	for _, f := range focusFuncs {
+		focusSet[f] = true
+	}
+	var flows []SizeFlow
+	for _, fi := range files {
+		if strings.HasSuffix(fi.relPath, "_test.go") {
+			continue
+		}
+		iterFuncDecls(fi, func(v funcVisitor) {
+			if len(focusFuncs) > 0 && !focusSet[bareName(v.name)] {
+				return
+			}
+			tracked := map[string]bool{}
+			// seed: x := strconv.Atoi(...) / x, err = binary.Uvarint(...)
+			ast.Inspect(v.body, func(n ast.Node) bool {
+				as, ok := n.(*ast.AssignStmt)
+				if !ok || len(as.Lhs) == 0 {
+					return true
+				}
+				for _, rhs := range as.Rhs {
+					if isNumericParseCall(rhs) {
+						if id, ok := as.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
+							tracked[id.Name] = true
+						}
+					}
+				}
+				return true
+			})
+			if len(tracked) == 0 {
+				return
+			}
+			// propagate: y := x + 1 / y = int(x) (fixed point, bounded)
+			for pass := 0; pass < 4; pass++ {
+				changed := false
+				ast.Inspect(v.body, func(n ast.Node) bool {
+					as, ok := n.(*ast.AssignStmt)
+					if !ok || len(as.Lhs) != len(as.Rhs) {
+						return true
+					}
+					for i, rhs := range as.Rhs {
+						id, ok := as.Lhs[i].(*ast.Ident)
+						if !ok || id.Name == "_" || tracked[id.Name] {
+							continue
+						}
+						if firstTracked(rhs, tracked) != "" {
+							tracked[id.Name] = true
+							changed = true
+						}
+					}
+					return true
+				})
+				if !changed {
+					break
+				}
+			}
+			var sinks []SizeSink
+			var checks []RangeCheck
+			ast.Inspect(v.body, func(n ast.Node) bool {
+				switch x := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "make" && len(x.Args) >= 2 {
+						for _, a := range x.Args[1:] {
+							if name := firstTracked(a, tracked); name != "" {
+								sinks = append(sinks, SizeSink{Line: fset.Position(x.Pos()).Line, Type: "alloc_size",
+									Var: name, Pattern: exprText(fset, x)})
+								break
+							}
+						}
+					}
+				case *ast.IndexExpr:
+					if name := firstTracked(x.Index, tracked); name != "" {
+						sinks = append(sinks, SizeSink{Line: fset.Position(x.Pos()).Line, Type: "index_access",
+							Var: name, Pattern: exprText(fset, x)})
+					}
+				case *ast.IfStmt:
+					ast.Inspect(x.Cond, func(c ast.Node) bool {
+						be, ok := c.(*ast.BinaryExpr)
+						if !ok {
+							return true
+						}
+						switch be.Op {
+						case token.LSS, token.GTR, token.LEQ, token.GEQ:
+							if name := firstTracked(be, tracked); name != "" {
+								checks = append(checks, RangeCheck{Line: fset.Position(be.Pos()).Line, Var: name,
+									Pattern: exprText(fset, be)})
+							}
+						}
+						return true
+					})
+				}
+				return true
+			})
+			if len(sinks) > 0 {
+				flows = append(flows, SizeFlow{Function: v.name, File: v.file, SizeSinks: sinks, RangeChecks: checks})
+			}
+		})
+	}
+	return flows
 }

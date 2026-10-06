@@ -1,0 +1,111 @@
+{
+ "go_id": "GEN-CWE20-PROTO-1",
+ "module_path": "generic",
+ "primary_domain": "NetworkRequestAndProtocolHandling",
+ "generic": true,
+ "references": [
+  "CWE-20 Improper Input Validation",
+  "CWE-1287 Improper Validation of Specified Type of Input"
+ ],
+ "behavior_chain": {
+  "summary": "协议服务器在认证/握手/状态机允许之前就处理并分配资源给客户端发来的报文，或对报文字段（类型、长度、计数）不按协议约束校验。",
+  "chain_type": "protocol_exchange",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "accept_connection",
+    "description": "接受客户端连接（TCP/UDP/QUIC/gRPC 流）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "read_protocol_message",
+    "description": "读取一条协议报文并解析字段",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: protocol_validation",
+    "description": "在处理报文之前，缺少对报文类型是否符合当前协议状态、字段值是否在协议范围内的校验",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复在处理前校验报文类型是否在当前状态允许、字段值是否在协议规定范围内，并对未认证阶段的报文施加严格限制"
+    },
+    "missing_step_category": "protocol_validation"
+   },
+   {
+    "step_id": 4,
+    "action": "process_message",
+    "description": "按报文内容执行操作或分配资源",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "send_protocol_response",
+    "description": "向客户端回送响应",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "protocol_message_without_state_or_field_validation",
+  "cwe_alignment": [
+   "CWE-20",
+   "CWE-400",
+   "CWE-1287"
+  ],
+  "attack_vector": "攻击者发送状态机不允许或字段越界的报文",
+  "impact": "拒绝服务、协议逻辑绕过"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

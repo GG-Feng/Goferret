@@ -1,0 +1,97 @@
+{
+ "go_id": "GEN-CWE306-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-306 Missing Authentication for Critical Function",
+  "OWASP API Security Top 10 API2:2023"
+ ],
+ "behavior_chain": {
+  "summary": "某个端点、协议升级或管理接口在提供服务前没有验证调用者身份，而同类端点都要求认证。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收对端点的请求或协议升级请求（WebSocket、gRPC 流、管理 API）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "MISSING: identity_verification",
+    "description": "在提供服务或升级连接之前，缺少对调用者身份的认证",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复在处理前调用与同类端点相同的认证逻辑（令牌/会话/证书校验），失败返回 401"
+    },
+    "missing_step_category": "identity_verification"
+   },
+   {
+    "step_id": 3,
+    "action": "upgrade_or_serve",
+    "description": "升级连接或直接提供服务/数据",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 4,
+    "action": "return_http_response",
+    "description": "返回结果",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 2
+  },
+  "exit_point": {
+   "step_id": 4
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "missing_authentication_on_endpoint",
+  "cwe_alignment": [
+   "CWE-306",
+   "CWE-287"
+  ],
+  "attack_vector": "未认证的客户端直接访问该端点",
+  "impact": "未授权访问功能或数据"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

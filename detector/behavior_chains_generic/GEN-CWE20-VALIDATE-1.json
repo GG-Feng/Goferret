@@ -1,0 +1,111 @@
+{
+ "go_id": "GEN-CWE20-VALIDATE-1",
+ "module_path": "generic",
+ "primary_domain": "InputParsingAndDeserialization",
+ "generic": true,
+ "references": [
+  "CWE-20 Improper Input Validation",
+  "CWE-697 Incorrect Comparison"
+ ],
+ "behavior_chain": {
+  "summary": "校验函数存在但实现不完整或校验了错误的对象（旧值、未规范化的值、只校验部分字段），导致校验可被绕过。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_object_to_validate",
+    "description": "收到待校验的对象/请求（新旧两个版本，或含多个字段）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "select_value_to_validate",
+    "description": "选择要校验的值",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: input_sanitization",
+    "description": "校验缺少对正确对象（新值、规范化后的值、全部相关字段）的覆盖，或校验器自身未经验证",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复改为校验新值/规范化后的值，并覆盖所有相关字段；对正则等校验器先验证其自身合法性"
+    },
+    "missing_step_category": "input_sanitization"
+   },
+   {
+    "step_id": 4,
+    "action": "run_validation",
+    "description": "执行校验逻辑并返回允许/拒绝",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "admit_or_reject",
+    "description": "据此放行或拒绝",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "incomplete_or_misdirected_validation",
+  "cwe_alignment": [
+   "CWE-20",
+   "CWE-697",
+   "CWE-184"
+  ],
+  "attack_vector": "攻击者提交只在未被校验的字段/版本里含有恶意内容的对象",
+  "impact": "校验绕过"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

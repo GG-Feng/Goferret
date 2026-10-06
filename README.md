@@ -95,6 +95,7 @@ python detect_vulns.py --git-url https://github.com/owner/repo --git-ref v1.0.0
 
 | 路径 | 内容 |
 | --- | --- |
+| [`detector/README.md`](detector/README.md) | 最新检测器的安装、配置、扫描命令与本地自测。 |
 | [`docs/workflow.md`](docs/workflow.md) | 完整阶段工作流。 |
 | [`docs/evidence-standard.md`](docs/evidence-standard.md) | JSON 字段、证据等级、判断矩阵和一致性规则。 |
 | [`docs/collaboration.md`](docs/collaboration.md) | GitHub 协作、复核与敏感材料规范。 |

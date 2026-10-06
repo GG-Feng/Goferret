@@ -27,6 +27,7 @@ import time
 import argparse
 import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from llm_config import resolve_llm
 
 
 # ── config ────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ def load_env():
             if '=' in line:
                 k, v = line.split('=', 1)
                 cfg[k.strip()] = v.strip()
+    resolve_llm(cfg)
     return cfg
 
 
@@ -175,16 +177,16 @@ def get_session():
 
 def classify_one(api_cfg, system_prompt, enriched_input, retries=3):
     """Send one enriched vuln to the LLM and return parsed classification."""
-    url = api_cfg['ARK_BASE_URL'] + '/v1/chat/completions'
+    url = api_cfg['LLM_BASE_URL'] + '/chat/completions'
     headers = {
-        'Authorization': 'Bearer ' + api_cfg['ARK_API_KEY'],
+        'Authorization': 'Bearer ' + api_cfg['LLM_API_KEY'],
         'Content-Type': 'application/json',
     }
 
     user_content = build_user_message(enriched_input)
 
     payload = {
-        'model': api_cfg['ARK_MODEL'],
+        'model': api_cfg['LLM_MODEL'],
         'messages': [
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_content},
@@ -282,7 +284,7 @@ def main():
     args = parser.parse_args()
 
     cfg = load_env()
-    for key in ('ARK_API_KEY', 'ARK_BASE_URL', 'ARK_MODEL'):
+    for key in ('LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'):
         if key not in cfg or not cfg[key]:
             print(f"Error: {key} not set in .env", file=sys.stderr)
             sys.exit(1)
@@ -316,7 +318,7 @@ def main():
         pending.append(go_id)
 
     print(f"Total: {len(tasks)}, Already done: {len(tasks) - len(pending)}, Pending: {len(pending)}")
-    print(f"Model: {cfg['ARK_MODEL']}")
+    print(f"Model: {cfg['LLM_MODEL']}")
     print(f"Workers: {args.workers}")
     print(f"Output: {os.path.abspath(args.output_dir)}")
     print()

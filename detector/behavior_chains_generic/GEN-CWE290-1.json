@@ -1,0 +1,115 @@
+{
+ "go_id": "GEN-CWE290-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-290 Authentication Bypass by Spoofing",
+  "CWE-346 Origin Validation Error",
+  "OWASP Authentication Cheat Sheet (trusting proxy headers)"
+ ],
+ "behavior_chain": {
+  "summary": "服务把请求中携带的身份类头部（X-Forwarded-User、X-Remote-User、X-Auth-*、内部身份 header）直接当作已验证的调用者身份，没有剥离/覆盖来自不可信来源的同名头部，也没有验证它来自可信代理。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收可能来自任意客户端的请求，请求头由客户端完全控制",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "read_identity_header",
+    "description": "读取表示身份/角色/租户的头部",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "r.Header.Get",
+      "md.Get"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: identity_verification",
+    "description": "在采信身份类头部之前，缺少对其来源的验证或对不可信来源同名头部的剥离",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复在入口处剥离来自不可信连接的身份头部，只在请求来自可信代理（mTLS/网络边界）时采信，或改为由服务端自己设置这些头部"
+    },
+    "missing_step_category": "identity_verification"
+   },
+   {
+    "step_id": 4,
+    "action": "use_header_as_principal",
+    "description": "把头部值作为当前用户/角色写入上下文或转发给后端",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "forward_or_authorize",
+    "description": "据此做授权决定或把请求转发给后端服务",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "trusted_client_identity_header",
+  "cwe_alignment": [
+   "CWE-290",
+   "CWE-346",
+   "CWE-287"
+  ],
+  "attack_vector": "攻击者在请求中伪造身份头部",
+  "impact": "身份冒充、权限提升"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

@@ -28,6 +28,7 @@ import tempfile
 import shutil
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from llm_config import resolve_llm
 
 
 # ── config ────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ def load_env():
             if '=' in line:
                 k, v = line.split('=', 1)
                 cfg[k.strip()] = v.strip()
+    resolve_llm(cfg)
     return cfg
 
 
@@ -567,7 +569,7 @@ def build_user_message(finding, func_source, unit_template, poc_template, http_p
     parts.append(f"- 函数: {finding.get('function', '')}")
     parts.append(f"- 模式: {finding.get('pattern_name', '')}")
     parts.append(f"- 置信度: {finding.get('confidence', 0)}")
-    parts.append(f"- 严重度: {finding.get('severity', '')}")
+    parts.append(f"- 严重度: {finding.get('severity', '')} (CVSS {finding.get('cvss_score', '?')}: {finding.get('cvss_vector', '')})")
     parts.append(f"- 缺失步骤类别: {finding.get('missing_step_category', '')}")
     parts.append(f"- CWE: {', '.join(finding.get('cwe_alignment', []))}")
     parts.append(f"- 推理: {finding.get('reasoning', '')}")
@@ -620,9 +622,9 @@ def generate_one(api_cfg, system_prompt, finding, func_source, unit_template,
                  poc_template, http_poc_template, project_info, pkg_name,
                  finding_id, retries=3):
     """Call LLM to generate test cases for one finding."""
-    url = api_cfg['ZHIPU_BASE_URL'] + '/chat/completions'
+    url = api_cfg['LLM_BASE_URL'] + '/chat/completions'
     headers = {
-        'Authorization': 'Bearer ' + api_cfg['ZHIPUAI_API_KEY'],
+        'Authorization': 'Bearer ' + api_cfg['LLM_API_KEY'],
         'Content-Type': 'application/json',
     }
 
@@ -632,7 +634,7 @@ def generate_one(api_cfg, system_prompt, finding, func_source, unit_template,
     )
 
     payload = {
-        'model': api_cfg['ZHIPU_MODEL'],
+        'model': api_cfg['LLM_MODEL'],
         'messages': [
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_content},
@@ -733,6 +735,8 @@ def save_outputs(output_dir, project_name, finding_id, result, finding):
              'pattern_name': finding.get('pattern_name', ''),
              'category': finding.get('missing_step_category', ''),
              'severity': finding.get('severity', ''),
+             'cvss_score': finding.get('cvss_score'),
+             'cvss_vector': finding.get('cvss_vector'),
              'files': []}
 
     # Unit test
@@ -918,7 +922,7 @@ def _signal_handler(sig, frame):
     print("\n[INTERRUPT] Stopping after current requests...")
 
 
-SEVERITY_ORDER = {'low': 0, 'medium': 1, 'high': 2}
+SEVERITY_ORDER = {'none': 0, 'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
 
 
 def main():
@@ -936,7 +940,7 @@ def main():
     parser.add_argument("--retry-failed", action="store_true", help="Re-generate failed entries")
     parser.add_argument("--categories", type=str, default=None, help="Only these categories (comma-separated)")
     parser.add_argument("--severity-filter", type=str, default=None,
-                        choices=['low', 'medium', 'high'], help="Minimum severity filter")
+                        choices=['none', 'low', 'medium', 'high', 'critical'], help="Minimum severity filter")
     parser.add_argument("--skip-compile", action="store_true", help="Skip compilation verification")
     args = parser.parse_args()
 
@@ -974,7 +978,7 @@ def main():
         sys.exit(1)
 
     cfg = load_env()
-    for key in ('ZHIPUAI_API_KEY', 'ZHIPU_BASE_URL', 'ZHIPU_MODEL'):
+    for key in ('LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'):
         if key not in cfg or not cfg[key]:
             print(f"Error: {key} not set in .env", file=sys.stderr)
             sys.exit(1)
@@ -1029,7 +1033,7 @@ def main():
             pending.append((fid, finding))
 
     print(f"Findings: {len(findings)}, Already done: {len(done_ids)}, Pending: {len(pending)}")
-    print(f"Model: {cfg['ZHIPU_MODEL']}")
+    print(f"Model: {cfg['LLM_MODEL']}")
     print(f"Target: {target_dir}")
     print(f"Output: {os.path.abspath(output_dir)}/{project_name}/")
     print()

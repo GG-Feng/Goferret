@@ -1,0 +1,110 @@
+{
+ "go_id": "GEN-CWE444-1",
+ "module_path": "generic",
+ "primary_domain": "NetworkRequestAndProtocolHandling",
+ "generic": true,
+ "references": [
+  "CWE-444 Inconsistent Interpretation of HTTP Requests",
+  "RFC 9110/9112 field syntax"
+ ],
+ "behavior_chain": {
+  "summary": "代理/网关在转发前对请求的协议字段（头部名、Transfer-Encoding、Content-Length、trailer、request-target）做了清理或解释，但存在未覆盖的等价写法（trailer、大小写、重复头、无路径的 request-target），前后端解释不一致。",
+  "chain_type": "protocol_exchange",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收客户端的原始 HTTP 请求",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "sanitize_protocol_fields",
+    "description": "按规则清理/规范化头部和请求行",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: protocol_validation",
+    "description": "在转发之前，缺少对协议字段所有等价写法（trailer、重复头、编码变体）的一致清理或拒绝",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复把同一规则应用到所有等价位置（trailer、重复头、编码变体），或直接拒绝含歧义字段的请求"
+    },
+    "missing_step_category": "protocol_validation"
+   },
+   {
+    "step_id": 4,
+    "action": "forward_request_upstream",
+    "description": "把请求转发给后端",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "return_upstream_response",
+    "description": "把后端响应返回给客户端",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "http_request_smuggling_inconsistent_parsing",
+  "cwe_alignment": [
+   "CWE-444",
+   "CWE-20"
+  ],
+  "attack_vector": "攻击者利用前后端对协议字段解释的差异",
+  "impact": "请求走私、头部注入、访问控制绕过"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

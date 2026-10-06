@@ -1,0 +1,114 @@
+{
+ "go_id": "GEN-CWE636-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-636 Not Failing Securely (Failing Open)",
+  "OWASP Fail Securely principle"
+ ],
+ "behavior_chain": {
+  "summary": "授权/策略判定过程遇到错误、超时、输入被截断或策略缺失时，默认放行而不是拒绝（fail-open）。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收需要授权判定的请求",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "prepare_policy_input",
+    "description": "把请求（头部、body、路径）整理成策略引擎的输入，可能对 body 做截断或限制",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "evaluate_policy",
+    "description": "调用策略引擎/外部授权服务评估",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [
+      "opa.Eval",
+      "authz.Check"
+     ],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 4,
+    "action": "MISSING: access_control",
+    "description": "策略评估出错、超时或输入不完整时，缺少“默认拒绝”的处理，请求被放行",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复在评估出错、超时、输入不完整或结果缺失时返回拒绝（fail-closed），而不是继续处理"
+    },
+    "missing_step_category": "access_control"
+   },
+   {
+    "step_id": 5,
+    "action": "continue_request_processing",
+    "description": "在判定不确定的情况下继续把请求交给后端",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 4
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "authorization_fail_open",
+  "cwe_alignment": [
+   "CWE-636",
+   "CWE-863",
+   "CWE-755"
+  ],
+  "attack_vector": "攻击者构造使策略评估出错或输入被截断的请求",
+  "impact": "授权绕过"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}

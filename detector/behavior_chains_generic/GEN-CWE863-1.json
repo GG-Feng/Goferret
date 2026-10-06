@@ -1,0 +1,111 @@
+{
+ "go_id": "GEN-CWE863-1",
+ "module_path": "generic",
+ "primary_domain": "AuthenticationAndAuthorization",
+ "generic": true,
+ "references": [
+  "CWE-863 Incorrect Authorization",
+  "OWASP Multi-Tenant / Authorization Cheat Sheet"
+ ],
+ "behavior_chain": {
+  "summary": "多租户/多项目系统中，处理函数使用请求里客户端提供的范围参数（project、org、tenant、namespace）作为查询范围，而不是用调用者被授权的范围，导致跨范围访问。",
+  "chain_type": "control_flow",
+  "steps": [
+   {
+    "step_id": 1,
+    "action": "receive_http_request",
+    "description": "接收带有范围参数的请求（查询参数或路径中的 project/org/tenant）",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 2,
+    "action": "extract_scope_parameter",
+    "description": "从请求中读取范围参数",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 3,
+    "action": "MISSING: access_control",
+    "description": "在使用客户端提供的范围参数之前，缺少与调用者被授权范围的比对",
+    "is_missing_step": true,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": "",
+     "patch_evidence": "修复把范围参数与调用者被授权的范围集合比对，或直接忽略客户端范围参数、改用调用者的范围"
+    },
+    "missing_step_category": "access_control"
+   },
+   {
+    "step_id": 4,
+    "action": "query_with_client_scope",
+    "description": "以客户端提供的范围为过滤条件查询或代理请求",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   },
+   {
+    "step_id": 5,
+    "action": "return_http_response",
+    "description": "返回属于该范围的数据",
+    "is_missing_step": false,
+    "evidence": {
+     "functions": [],
+     "apis": [],
+     "files": [],
+     "call_chains": [],
+     "code_snippet": ""
+    }
+   }
+  ],
+  "entry_point": {
+   "step_id": 1
+  },
+  "missing_step": {
+   "step_id": 3
+  },
+  "exit_point": {
+   "step_id": 5
+  }
+ },
+ "vulnerability_pattern": {
+  "pattern_name": "client_controlled_scope_parameter",
+  "cwe_alignment": [
+   "CWE-863",
+   "CWE-639",
+   "CWE-284"
+  ],
+  "attack_vector": "攻击者在请求中指定自己无权访问的 project/tenant",
+  "impact": "跨项目/跨租户数据泄露或操作"
+ },
+ "extraction_confidence": 0.9,
+ "data_availability": {
+  "has_func_sources": false,
+  "has_ast_call_chains": false,
+  "has_ast_data_flow": false,
+  "has_classification": false,
+  "has_diff": false,
+  "generic_from_public_knowledge": true
+ }
+}
