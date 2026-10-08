@@ -478,6 +478,11 @@ func main() {
 
 def get_template(category):
     """Get unit test template and PoC template for a category."""
+    if category == 'other_security':
+        return ('Write a case-specific Go test. Derive its trigger and expected security '
+                'property from the verified evidence. Assert an observable result; a log '
+                'line or successful compilation alone is not a vulnerability proof.',
+                POC_TEMPLATE, HTTP_POC_TEMPLATE)
     unit_tpl = TEMPLATES.get(category, TEMPLATES.get('input_sanitization'))
     return unit_tpl, POC_TEMPLATE, HTTP_POC_TEMPLATE
 
@@ -517,8 +522,18 @@ def get_package_name(target_dir, file_path):
 
 # ── function source extraction ────────────────────────────────────────
 
-def extract_function_source(target_dir, file_path, function_name):
+_ENHANCED_TEST_CONTEXT = None
+
+def extract_function_source(target_dir, file_path, function_name, function_id=None):
     """Extract source code for a specific function. Adapted from detect_vulns.py."""
+    if _ENHANCED_TEST_CONTEXT is not None:
+        if function_id is None:
+            ids = _ENHANCED_TEST_CONTEXT.ids_for_key(f'{file_path}:{function_name}')
+            function_id = ids[0] if len(ids) == 1 else None
+        f = _ENHANCED_TEST_CONTEXT.functions.get(function_id)
+        if f and f['file'] == file_path:
+            return _ENHANCED_TEST_CONTEXT.reference(file_path, f['line'], f['end_line'])['snippet']
+        return None
     source_path = os.path.join(target_dir, file_path)
     if not os.path.isfile(source_path):
         return None
@@ -554,6 +569,8 @@ def extract_function_source(target_dir, file_path, function_name):
 
 def make_finding_id(finding):
     """Generate a stable short ID for a finding."""
+    if finding.get("finding_id"):
+        return finding["finding_id"]
     key = f"{finding.get('function', '')}:{finding.get('pattern_name', '')}:{finding.get('missing_step_category', '')}"
     return hashlib.md5(key.encode()).hexdigest()[:12]
 
@@ -595,7 +612,10 @@ def build_user_message(finding, func_source, unit_template, poc_template, http_p
     parts.append("")
 
     # Check if HTTP-related
-    evidence_text = (finding.get('evidence', '') + ' ' + finding.get('reasoning', '')).lower()
+    evidence = finding.get('evidence', '')
+    if not isinstance(evidence, str):
+        evidence = json.dumps(evidence, ensure_ascii=False)
+    evidence_text = (evidence + ' ' + str(finding.get('reasoning', ''))).lower()
     func_name = finding.get('function', '').lower()
     http_keywords = ['http.handler', 'http.handlerfunc', 'http.request', 'gin.context',
                      'echo.context', 'httptest', 'servehttp', 'handler', 'router',
@@ -742,10 +762,8 @@ def save_outputs(output_dir, project_name, finding_id, result, finding):
     # Unit test
     unit = result.get('unit_test', {})
     if unit.get('source'):
-        # Force a descriptive filename based on pattern name, ignore LLM's file_name
-        pattern_slug = re.sub(r'[^a-z0-9_]', '_', finding.get('pattern_name', '').lower())
-        pattern_slug = re.sub(r'_+', '_', pattern_slug).strip('_') or finding_id
-        fname = f'{pattern_slug}_test.go'
+        # Match metadata identity so verification finds the generated unit.
+        fname = f'{finding_id}_test.go'
         fpath = os.path.join(unit_dir, fname)
         with open(fpath, 'w', encoding='utf-8') as f:
             f.write(unit['source'])
@@ -754,9 +772,7 @@ def save_outputs(output_dir, project_name, finding_id, result, finding):
     # PoC
     poc = result.get('poc', {})
     if poc.get('source'):
-        pattern_slug = re.sub(r'[^a-z0-9_]', '_', finding.get('pattern_name', '').lower())
-        pattern_slug = re.sub(r'_+', '_', pattern_slug).strip('_') or finding_id
-        fname = f'poc_{pattern_slug}.go'
+        fname = f'poc_{finding_id}.go'
         fpath = os.path.join(poc_dir, fname)
         with open(fpath, 'w', encoding='utf-8') as f:
             f.write(poc['source'])
@@ -942,6 +958,7 @@ def main():
     parser.add_argument("--severity-filter", type=str, default=None,
                         choices=['none', 'low', 'medium', 'high', 'critical'], help="Minimum severity filter")
     parser.add_argument("--skip-compile", action="store_true", help="Skip compilation verification")
+    parser.add_argument("--include-unknown", action="store_true", help="Also generate tests for enhanced unknown candidates")
     args = parser.parse_args()
 
     # Resolve project directory
@@ -990,7 +1007,23 @@ def main():
     with open(report_path, encoding='utf-8') as f:
         report = json.load(f)
 
+    global _ENHANCED_TEST_CONTEXT
+    _ENHANCED_TEST_CONTEXT = None
+    if report.get('schema_version') == 'goforret.enhanced/v1':
+        import enhanced_detection as ed
+        binary = ed.build_analyzer()
+        index = json.loads(subprocess.run([binary, '--dir', target_dir, '--source-index'],
+                                          check=True, capture_output=True, text=True, timeout=120).stdout)
+        _ENHANCED_TEST_CONTEXT = ed.Context(target_dir, index)
+        expected = report.get('enhanced', {}).get('source_hashes', {})
+        if expected != {file: data['hash'] for file, data in _ENHANCED_TEST_CONTEXT.files.items()}:
+            print('Error: target source differs from the enhanced detection report', file=sys.stderr)
+            sys.exit(1)
+
     findings = report.get('findings', [])
+    if report.get('schema_version') == 'goforret.enhanced/v1':
+        allowed = {'supported', 'unknown'} if args.include_unknown else {'supported'}
+        findings = [f for f in findings if f.get('validation_status') in allowed]
     if not findings:
         print("No findings in report.")
         return
@@ -1060,7 +1093,7 @@ def main():
         pkg_name = 'main'
         if ':' in func_ref:
             file_path, func_name = func_ref.rsplit(':', 1)
-            func_source = extract_function_source(target_dir, file_path, func_name)
+            func_source = extract_function_source(target_dir, file_path, func_name, finding.get('function_id'))
             pkg_name = get_package_name(target_dir, file_path)
 
         chain_result, err = generate_one(

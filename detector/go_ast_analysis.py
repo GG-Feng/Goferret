@@ -74,7 +74,7 @@ def _find_go():
     return None
 
 
-def analyze_go_source(source_dir, changed_files=None, focus_functions=None):
+def analyze_go_source(source_dir, changed_files=None, focus_functions=None, binary=None, retain_protection=False):
     """Analyze Go source code in a directory.
 
     Args:
@@ -85,11 +85,13 @@ def analyze_go_source(source_dir, changed_files=None, focus_functions=None):
     Returns:
         dict with analysis results, or None if analysis fails.
     """
-    binary = find_analyzer_binary()
+    binary = binary or find_analyzer_binary()
     if not binary:
         return _empty_result()
 
     cmd = [binary, '--dir', source_dir]
+    if retain_protection:
+        cmd.append('--retain-protection')
 
     if focus_functions:
         cmd.extend(['--focus-funcs', ','.join(focus_functions)])

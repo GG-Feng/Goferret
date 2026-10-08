@@ -493,6 +493,8 @@ var sanitizerPatterns = []struct {
 
 // ── Analysis ──────────────────────────────────────────────────────────────
 
+var retainProtectionHypotheses bool
+
 func main() {
 	dir := flag.String("dir", ".", "Source directory to analyze")
 	focusFuncs := flag.String("focus-funcs", "", "Comma-separated function names to focus on")
@@ -500,7 +502,16 @@ func main() {
 	guardsFile := flag.String("guards", "", "Guard-chain mode: file path relative to --dir")
 	guardFunc := flag.String("guard-func", "", "Guard-chain mode: function name")
 	guardLine := flag.Int("guard-line", 0, "Guard-chain mode: stop at this line (0 = whole function)")
+	indexOnly := flag.Bool("source-index", false, "Index production source spans without build or rule filtering")
+	flag.BoolVar(&retainProtectionHypotheses, "retain-protection", false, "Retain sanitizer input roots for evidence verification")
 	flag.Parse()
+	if *indexOnly {
+		if err := json.NewEncoder(os.Stdout).Encode(sourceIndex(*dir)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *guardsFile != "" {
 		gr, err := extractGuards(*dir, *guardsFile, *guardFunc, *guardLine)

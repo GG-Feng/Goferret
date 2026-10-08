@@ -295,7 +295,7 @@ R2_SINK_CATEGORY = {
 }
 
 
-def r2_candidates(r2_facts, checks, r2_sanitizers=None, size_flow=None):
+def r2_candidates(r2_facts, checks, r2_sanitizers=None, size_flow=None, retain_all=False):
     """(src, sink, category) triples for rule R2.
 
     r2_facts come from param_taint.tainted_sinks: a sink whose arguments are reached
@@ -324,6 +324,8 @@ def r2_candidates(r2_facts, checks, r2_sanitizers=None, size_flow=None):
                 any(lo <= rc.get('line', 0) < hi for rc in ((size_flow or {}).get('range_checks') or [])):
             continue
         out.append((src, snk, cat))
+    if retain_all:
+        return out
     # one finding per category: the earliest reached sink (one missing check upstream)
     seen, uniq = set(), []
     for src, snk, cat in sorted(out, key=lambda t: (t[1]['line'], t[2], t[0]['line'])):
@@ -344,7 +346,7 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
                    vuln_db, source_only=False, size_flows_by_func=None, rules=('v2',),
                    r2_facts_by_func=None, r2_sanitizers_by_func=None, r3_facts_by_func=None,
                    r5_facts_by_func=None, check_lines_by_func=None, ext_checks_by_func=None,
-                   x4_facts_by_func=None):
+                   x4_facts_by_func=None, retain_protection=False):
     """Turn merged facts into deterministic findings.
 
     extraction_by_func: {func_key: extraction dict or None}
@@ -376,8 +378,18 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
     r5_facts_by_func = r5_facts_by_func or {}
     x4_facts_by_func = x4_facts_by_func or {}   # X4: chain_align.decide facts (already rule-checked)
 
-    for func_key in sorted(set(extraction_by_func) | set(data_flow_by_func) | set(x4_facts_by_func)):
+    keys = set(extraction_by_func) | set(data_flow_by_func) | set(x4_facts_by_func)
+    original_sizes = size_flows_by_func
+    original_sanitizers = r2_sanitizers_by_func
+    if retain_protection:
+        keys |= set(r2_facts_by_func) | set(r3_facts_by_func) | set(r5_facts_by_func) | set(size_flows_by_func)
+        size_flows_by_func = {k: dict(v, range_checks=[]) for k, v in size_flows_by_func.items()}
+        r2_sanitizers_by_func = {}
+    protections = {}
+    for func_key in sorted(keys):
         extraction = extraction_by_func.get(func_key)
+        if extraction is None and retain_protection:
+            extraction = {}
         if extraction is None:
             continue  # no semantic extraction (LLM failed or skipped) -> no facts
         facts = merge_facts(extraction, data_flow_by_func.get(func_key), KIND_TO_SINK_TYPE_V5 if x2 else None)
@@ -385,6 +397,11 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
         for c in ext_checks_by_func.get(func_key) or []:
             checks.append({'line': c['line'], 'category': c['category'], 'desc': c.get('desc', ''), 'ast': True})
         checks.sort(key=lambda c: c['line'])
+        if retain_protection:
+            protections[func_key] = (list(checks)
+                + list((original_sizes.get(func_key) or {}).get('range_checks') or [])
+                + list(original_sanitizers.get(func_key) or []))
+            checks = []
         if f4:
             # F4 (v4.2): a check the LLM reports counts only where the AST has a call or a
             # comparison within a line of it — an invented or misplaced check must not
@@ -399,7 +416,7 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
             facts_ = [x for x in r2_facts_by_func[func_key]
                       if ('R4' in rules if x['sink'].get('type') == 'unbounded_read' else 'R2' in rules)]
             for src, snk, cat in r2_candidates(facts_, checks, r2_sanitizers_by_func.get(func_key),
-                                               size_flows_by_func.get(func_key)):
+                                               size_flows_by_func.get(func_key), retain_all=retain_protection):
                 f = _make_finding(func_key, src, snk, cat, purpose, candidate_templates, templates)
                 f['rule_id'] = 'R4' if snk.get('type') == 'unbounded_read' else 'R2'
                 f['source_provenance'] = src.get('provenance', '')
@@ -438,7 +455,8 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
                 if cur is None or (fact['aligned_ratio'], not fact.get('generic'), fact.get('peers_present', 0)) > \
                         (cur['aligned_ratio'], not cur.get('generic'), cur.get('peers_present', 0)):
                     best_x4[fact['category']] = fact
-            for fact in [best_x4[c] for c in sorted(best_x4)]:
+            selected_x4 = x4_facts_by_func[func_key] if retain_protection else [best_x4[c] for c in sorted(best_x4)]
+            for fact in selected_x4:
                 f = _make_finding(func_key, fact['source'], fact['sink'], fact['category'],
                                   purpose, candidate_templates, templates)
                 f['reasoning'] = ((f"函数用途：{purpose}。" if purpose else '') +
@@ -495,10 +513,14 @@ def build_findings(extraction_by_func, data_flow_by_func, candidate_templates,
                     if f3 and _is_source_only(cat) and snk['type'] not in V5_SINK_CATEGORY:
                         continue
                     candidates.append((src, snk, cat))
-        for src, snk, cat in _collapse(candidates):
+        for src, snk, cat in (candidates if retain_protection else _collapse(candidates)):
             findings.append(_make_finding(func_key, src, snk, cat,
                                           purpose, candidate_templates, templates))
-    if v3:
+    if retain_protection:
+        for f in findings:
+            f.setdefault('rule_id', 'v2_span')
+            f['protection_hypotheses'] = protections.get(f['function'], [])
+    if v3 and not retain_protection:
         for f in findings:
             f.setdefault('rule_id', 'v2_span')
         # R2 only adds flows the span rule missed

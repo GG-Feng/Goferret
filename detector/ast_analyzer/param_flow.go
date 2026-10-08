@@ -880,6 +880,9 @@ func isStmtReceiver(fun ast.Expr) bool {
 }
 
 func isR2Sanitizer(code string) bool {
+	if retainProtectionHypotheses {
+		return false
+	}
 	for _, sa := range r2Sanitizers {
 		if strings.Contains(code, sa.pattern) {
 			return true
@@ -1409,7 +1412,7 @@ func extractParamFlows(fset *token.FileSet, files []fileInfo, focusFuncs []strin
 				}
 				return true
 			})
-			safeCT := safeContentType(body)
+			safeCT := !retainProtectionHypotheses && safeContentType(body)
 			seenCallee := map[string]bool{}
 			if pf.EntryKind == "http_handler" {
 				pf.Handler = true

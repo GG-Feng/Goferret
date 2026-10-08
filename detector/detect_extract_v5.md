@@ -56,7 +56,7 @@
 ```json
 [
   {
-    "function": "file.go:FunctionName",
+    "function_id": "file.go:FunctionName",
     "purpose": "",
     "external_entry": {"kind": "internal"},
     "semantic_inputs": [],
@@ -67,6 +67,7 @@
 ```
 
 即使输入只有一个函数，也输出只含一项的数组。
+`function_id` 必须逐字复制输入末尾 `Function IDs (same input order)` 列表中的对应值，包含接收者名称时也不得省略；不要改用 `function` 字段。
 
 # 约束
 

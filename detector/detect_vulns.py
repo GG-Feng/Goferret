@@ -24,6 +24,7 @@ import shutil
 import argparse
 import signal
 import subprocess
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -37,12 +38,15 @@ import authz_consistency
 import chain_align
 from llm_config import resolve_llm
 
+_ENHANCED_CONTEXT = None
+
 
 # ── config ────────────────────────────────────────────────────────────
 
 def load_env():
     cfg = {}
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    env_path = os.environ.get('GOFORRET_ENV_FILE') or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '.env')
     if not os.path.isfile(env_path):
         print("Error: .env file not found", file=sys.stderr)
         sys.exit(1)
@@ -79,6 +83,17 @@ def _qname(func):
 
 def extract_func_sources(target_dir, functions):
     """Extract source code for given function definitions."""
+    if _ENHANCED_CONTEXT is not None:
+        sources = []
+        for func in functions:
+            key = f"{func['file']}:{_qname(func)}"
+            ids = _ENHANCED_CONTEXT.ids_for_key(key)
+            if len(ids) != 1:
+                continue
+            f = _ENHANCED_CONTEXT.functions[ids[0]]
+            ref = _ENHANCED_CONTEXT.reference(f['file'], f['line'], f['end_line'])
+            sources.append({'file': f['file'], 'function': _qname(func), 'source': ref['snippet'], 'line': f['line']})
+        return sources
     sources = []
     seen = set()
 
@@ -140,19 +155,20 @@ def extract_func_sources(target_dir, functions):
 
 # ── Stage 1: AST Scan ─────────────────────────────────────────────────
 
-def stage_ast_scan(target_dir, max_depth=4):
+def stage_ast_scan(target_dir, max_depth=4, analyzer=None):
+    analyzer = analyzer or analyze_go_source
     print("[Stage 1/5] AST scan...")
     start = time.time()
 
     # Try full scan first
-    result = analyze_go_source(target_dir, changed_files=None, focus_functions=None)
+    result = analyzer(target_dir, changed_files=None, focus_functions=None)
 
     # ParseDir only covers the root package; merge subdirectory packages so
     # multi-package repos (binding/, internal/, ...) are scanned at all.
     subdirs = _find_go_subdirs(target_dir, max_depth)
     if len(subdirs) > 1:
         print(f"  Merging {len(subdirs)} package directories...")
-        merged = _merge_subdir_results(target_dir, subdirs)
+        merged = _merge_subdir_results(target_dir, subdirs, analyzer)
         if merged:
             result = merged
 
@@ -184,7 +200,8 @@ def _find_go_subdirs(target_dir, max_depth=4):
     return sorted(go_dirs)
 
 
-def _merge_subdir_results(target_dir, subdirs):
+def _merge_subdir_results(target_dir, subdirs, analyzer=None):
+    analyzer = analyzer or analyze_go_source
     """Analyze subdirectories separately and merge results."""
     merged = {
         'imports': {},
@@ -203,7 +220,9 @@ def _merge_subdir_results(target_dir, subdirs):
 
     for subdir in subdirs:
         rel = os.path.relpath(subdir, target_dir).replace('\\', '/')
-        result = analyze_go_source(subdir, changed_files=None, focus_functions=None)
+        result = analyzer(subdir, changed_files=None, focus_functions=None)
+        if result.get('parse_mode') == 'unavailable':
+            merged.setdefault('analysis_errors', []).append({'path': rel, 'reason': 'structural_analysis_unavailable'})
 
         # Adjust paths and merge
         for k, v in result.get('imports', {}).items():
@@ -539,7 +558,7 @@ BASELINE_CALLS = 78
 
 def stage_semantic_extraction(api_cfg, target_dir, scored_functions, workers=1,
                               batch_size=1, flow_gate=False, max_funcs=0, allow_keys=None,
-                              prompt_file='detect_extract.md', entry_seeds=None):
+                              prompt_file='detect_extract.md', entry_seeds=None, strict_ids=False):
     """LLM extracts semantic facts only (detect_extract.md); no judgments.
 
     Cost control for full runs:
@@ -555,6 +574,9 @@ def stage_semantic_extraction(api_cfg, target_dir, scored_functions, workers=1,
     start = time.time()
 
     system_prompt = load_prompt(prompt_file)
+    if strict_ids:
+        system_prompt += ('\nReturn a JSON array. Every item MUST include function_id exactly as supplied. '
+                          'Return exactly one item per input ID, even when all fact lists are empty.')
 
     def _has_flow(target):
         df = target.get('data_flow') or {}
@@ -613,6 +635,9 @@ def stage_semantic_extraction(api_cfg, target_dir, scored_functions, workers=1,
         func = target['function']
         source = source_map.get((func['file'], _qname(func)), '')
         if not source:
+            if strict_ids:
+                funnel.setdefault('extraction_failures', []).append({
+                    'function_id': f"{func['file']}:{_qname(func)}", 'reason': 'source_unavailable'})
             continue
         df = target.get('data_flow') or {}
         is_paired = bool(df.get('sources') and df.get('sinks'))
@@ -624,6 +649,9 @@ def stage_semantic_extraction(api_cfg, target_dir, scored_functions, workers=1,
 
     def _extract_batch(batch):
         user_msg = _build_batch_message(batch, entry_seeds)
+        if strict_ids:
+            user_msg += '\nFunction IDs (same input order): ' + json.dumps([
+                f"{f['file']}:{_qname(f)}" for _, f, _, _ in batch])
         max_tk = 2048 * len(batch)
         return batch, call_llm(api_cfg, system_prompt, user_msg, max_tokens=max_tk)
 
@@ -645,9 +673,19 @@ def stage_semantic_extraction(api_cfg, target_dir, scored_functions, workers=1,
         if err:
             for i, func, _source, _start in batch:
                 errors += 1
+                if strict_ids:
+                    funnel.setdefault('extraction_failures', []).append({
+                        'function_id': f"{func['file']}:{_qname(func)}", 'reason': 'model_error: ' + err})
                 print(f"  [{i+1}/{len(targets)}] {func['file']}:{func['name']} ERROR: {err}")
             continue
         items = result if isinstance(result, list) else [result]
+        if strict_ids:
+            from enhanced_detection import bind_extractions
+            keys = [f"{f['file']}:{_qname(f)}" for _, f, _, _ in batch]
+            bound, binding_errors = bind_extractions(items, keys, {
+                f"{f['file']}:{_qname(f)}": (start, start + src.count('\n')) for _, f, src, start in batch})
+            funnel.setdefault('extraction_failures', []).extend(binding_errors)
+            items = [bound.get(k) for k in keys]
         for idx, (i, func, _source, _start) in enumerate(batch):
             key = f"{func['file']}:{_qname(func)}"
             if idx >= len(items) or not items[idx]:
@@ -873,6 +911,25 @@ def _log_call(call_id, attempt, req_model, status, outcome, data=None, max_token
         pass
 
 
+def _save_raw_call(call_id, attempt, payload, status=None, response_text=None, error=None):
+    """Keep optional request/response evidence without authentication headers."""
+    root = os.environ.get('GOFORRET_LLM_RAW_DIR')
+    if not root:
+        return
+    try:
+        os.makedirs(root, exist_ok=True)
+        record = {'call_id': call_id, 'attempt': attempt, 'request': payload,
+                  'http_status': status, 'response_text': response_text, 'error': error}
+        path = os.path.join(root, f'{call_id}_{attempt}.json')
+        temp = path + f'.{os.getpid()}.tmp'
+        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w',
+                       encoding='utf-8') as f:
+            json.dump(record, f, ensure_ascii=False)
+        os.replace(temp, path)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def call_llm(api_cfg, system_prompt, user_content, retries=3, max_tokens=8192):
     url = api_cfg['LLM_BASE_URL'] + '/chat/completions'
     headers = {
@@ -881,8 +938,9 @@ def call_llm(api_cfg, system_prompt, user_content, retries=3, max_tokens=8192):
     }
 
     content = ''
-    call_id = '%x' % (time.time_ns() ^ threading.get_ident())
+    call_id = uuid.uuid4().hex
     for attempt in range(retries):
+        payload = None
         try:
             payload = {
                 'model': api_cfg['LLM_MODEL'],
@@ -894,15 +952,23 @@ def call_llm(api_cfg, system_prompt, user_content, retries=3, max_tokens=8192):
                 'max_tokens': max_tokens,
                 'thinking': {'type': 'disabled'},
             }
+            if api_cfg.get('LLM_PROVIDER') == 'deepseek':
+                payload['response_format'] = {'type': 'json_object'}
+            _save_raw_call(call_id, attempt, payload)
 
             r = requests.post(url, headers=headers, json=payload, timeout=300)
+            _save_raw_call(call_id, attempt, payload, status=r.status_code,
+                           response_text=r.text.replace(api_cfg['LLM_API_KEY'], '[REDACTED]'))
 
-            if r.status_code == 429:
-                _log_call(call_id, attempt, api_cfg['LLM_MODEL'], 429, 'rate_limited', max_tokens=max_tokens)
-                wait = min(30, 5 * (attempt + 1))
-                print(f"    [429 rate limited, waiting {wait}s]", flush=True)
-                time.sleep(wait)
-                continue
+            if r.status_code in (408, 429, 500, 502, 503, 504):
+                _log_call(call_id, attempt, api_cfg['LLM_MODEL'], r.status_code,
+                          'transient_http_error', max_tokens=max_tokens)
+                if attempt < retries - 1:
+                    wait = min(30, 5 * (attempt + 1))
+                    print(f"    [HTTP {r.status_code}, waiting {wait}s]", flush=True)
+                    time.sleep(wait)
+                    continue
+                return None, f"HTTP {r.status_code}: {r.text[:300]}"
 
             if r.status_code != 200:
                 _log_call(call_id, attempt, api_cfg['LLM_MODEL'], r.status_code, 'http_error', max_tokens=max_tokens)
@@ -946,12 +1012,15 @@ def call_llm(api_cfg, system_prompt, user_content, retries=3, max_tokens=8192):
                 continue
             return None, f"JSON parse error: {e}"
         except requests.exceptions.Timeout:
+            _save_raw_call(call_id, attempt, payload, error='timeout')
             _log_call(call_id, attempt, api_cfg['LLM_MODEL'], None, 'timeout', max_tokens=max_tokens)
             if attempt < retries - 1:
                 time.sleep(3)
                 continue
             return None, "timeout"
         except Exception as e:
+            _save_raw_call(call_id, attempt, payload,
+                           error=str(e).replace(api_cfg['LLM_API_KEY'], '[REDACTED]'))
             _log_call(call_id, attempt, api_cfg['LLM_MODEL'], None, 'exception:' + type(e).__name__, max_tokens=max_tokens)
             if attempt < retries - 1:
                 time.sleep(2)
@@ -1005,7 +1074,8 @@ def _signal_handler(sig, frame):
 
 
 def main():
-    global interrupted
+    global interrupted, _ENHANCED_CONTEXT
+    _ENHANCED_CONTEXT = None
     signal.signal(signal.SIGINT, _signal_handler)
 
     parser = argparse.ArgumentParser(description="Detect vulnerabilities in a Go project")
@@ -1013,13 +1083,6 @@ def main():
     parser.add_argument("--git-url", default=None, help="GitHub repo URL to clone and analyze (e.g. https://github.com/gin-gonic/gin)")
     parser.add_argument("--git-ref", default=None, help="Git branch/tag/commit to checkout after clone (default: default branch)")
     parser.add_argument("--db", default=None, help="Vulnerability database file (default: vuln_db.json)")
-    parser.add_argument("--no-kb", action="store_true",
-                        help="Ablation mode: remove the KB front-end chain entirely — skip domain "
-                             "classification (no LLM call), do not load vuln_db.json / template "
-                             "retrieval, drop the KB template-API +2 function bonus, and renormalize "
-                             "confidence over code_evidence+ast_corroboration. AST tables, semantic "
-                             "extraction prompt and decide.py stay untouched. Mutually exclusive "
-                             "with --db and --domains")
     parser.add_argument("--output", default=None, help="Override report output path (default: projects/<id>/report.json)")
     parser.add_argument("--no-copy", action="store_true", help="Skip copying source into project directory")
     parser.add_argument("--max-functions", type=int, default=0,
@@ -1071,7 +1134,15 @@ def main():
     parser.add_argument("--source-only-findings", action="store_true",
                         help="Also report functions with attacker-controlled input but no sink "
                              "(catches trusted-header/unvalidated-length classes; widens results)")
+    parser.add_argument("--detection-mode", choices=("legacy", "enhanced"), default="legacy")
+    parser.add_argument("--enhanced-max-model-calls", type=int, default=0, metavar="N",
+                        help="Cap enhanced discovery and verification model requests (0 = unlimited; "
+                             "earlier structural pipeline calls are separate)")
     args = parser.parse_args()
+    enhanced = args.detection_mode == "enhanced"
+
+    if args.enhanced_max_model_calls < 0:
+        parser.error("--enhanced-max-model-calls must be nonnegative")
 
     if not args.target and not args.git_url:
         parser.error("Either --target or --git-url is required")
@@ -1081,10 +1152,6 @@ def main():
         parser.error(f"unknown rule(s) in --rules: {unknown}")
     if args.target and args.git_url:
         parser.error("Use --target or --git-url, not both")
-    if args.no_kb and args.db:
-        parser.error("--no-kb removes the knowledge base entirely; --db is mutually exclusive")
-    if args.no_kb and args.domains:
-        parser.error("--no-kb removes the knowledge base entirely; --domains is mutually exclusive")
 
     # Create project directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1135,36 +1202,39 @@ def main():
             print(f"Error: {key} not set in .env", file=sys.stderr)
             sys.exit(1)
 
-    # Load vulnerability database (skipped entirely in --no-kb ablation mode)
-    if args.no_kb:
-        vuln_db = {}
-        print("KB ablation mode (--no-kb): domain classification, vuln_db loading and "
-              "template retrieval are skipped; KB scoring bonus removed.\n")
-    else:
-        db_path = args.db or "vuln_db.json"
-        if not os.path.isfile(db_path):
-            print(f"Error: {db_path} not found. Run build_vuln_db.py first.", file=sys.stderr)
-            sys.exit(1)
-        with open(db_path, encoding='utf-8') as f:
-            vuln_db = json.load(f)
-        print(f"Loaded vuln_db: {vuln_db['metadata']['total_templates']} templates, "
-              f"{vuln_db['metadata']['total_records']} records\n")
+    # Every detection run uses a vulnerability database.
+    db_path = args.db or "vuln_db.json"
+    if not os.path.isfile(db_path):
+        print(f"Error: {db_path} not found. Run build_vuln_db.py first.", file=sys.stderr)
+        sys.exit(1)
+    with open(db_path, encoding='utf-8') as f:
+        vuln_db = json.load(f)
+    print(f"Loaded vuln_db: {vuln_db['metadata']['total_templates']} templates, "
+          f"{vuln_db['metadata']['total_records']} records\n")
 
     overall_start = time.time()
 
     # Stage 1: AST scan
     if interrupted:
         return
-    ast_result = stage_ast_scan(target_dir, max_depth=None if 'F2' in rules else 4)
+    source_index = None
+    analyzer = None
+    if enhanced:
+        import enhanced_detection as ed
+        from functools import partial
+        binary = ed.build_analyzer()
+        source_index = json.loads(subprocess.run(
+            [binary, '--dir', target_dir, '--source-index'], check=True,
+            capture_output=True, text=True, timeout=120).stdout)
+        _ENHANCED_CONTEXT = ed.Context(target_dir, source_index)
+        analyzer = partial(analyze_go_source, binary=binary, retain_protection=True)
+    ast_result = stage_ast_scan(target_dir, max_depth=None if enhanced or 'F2' in rules else 4,
+                               analyzer=analyzer)
 
     # Stage 2: Domain classification
     if interrupted:
         return
-    if args.no_kb:
-        domains = []
-        domain_time = 0.0
-        print("[Stage 2/5] Domain classification: skipped (--no-kb)")
-    elif args.domains:
+    if args.domains:
         domains = [{'domain': d.strip(), 'confidence': 1.0, 'evidence': 'manually specified'}
                     for d in args.domains.split(',')]
         print(f"[Stage 2/5] Domains (manual): {[d['domain'] for d in domains]}")
@@ -1175,12 +1245,8 @@ def main():
     # Stage 3: Pattern retrieval
     if interrupted:
         return
-    if args.no_kb:
-        candidate_templates = []
-        print("[Stage 3/5] Pattern retrieval: skipped (--no-kb)")
-    else:
-        candidate_templates = stage_pattern_retrieval(vuln_db, domains, ast_result,
-                                                      deterministic='F1' in rules)
+    candidate_templates = stage_pattern_retrieval(vuln_db, domains, ast_result,
+                                                  deterministic='F1' in rules)
 
     # Stage 4: Function prioritization
     if interrupted:
@@ -1229,7 +1295,7 @@ def main():
         if 'R2' in rules or 'R4' in rules:
             r2_facts = param_taint.tainted_sinks(pflows, modules, max_hops=args.r2_max_hops,
                                                  name_dispatch=not args.no_name_dispatch,
-                                                 wire_types=wire_types, extra_seeds=llm_seeds)
+                                                 wire_types=wire_types, extra_seeds=llm_seeds, retain_protection=enhanced)
             r2_sanitizers = param_taint.sanitizers_by_func(pflows)
             print(f"  R2: {sum(len(v) for v in r2_facts.values())} tainted sink(s) in "
                   f"{len(r2_facts)} function(s)")
@@ -1237,7 +1303,7 @@ def main():
             r3_facts = validator_contract.r3_facts(pflows, modules, max_hops=args.r2_max_hops,
                                                    name_dispatch=not args.no_name_dispatch,
                                                    infer_purpose=args.r3_infer_purpose,
-                                                   wire_types=wire_types, extra_seeds=llm_seeds)
+                                                   wire_types=wire_types, extra_seeds=llm_seeds, retain_protection=enhanced)
             print(f"  R3: {sum(len(v) for v in r3_facts.values())} validator contract gap(s) in "
                   f"{len(r3_facts)} function(s)")
         if 'R5' in rules:
@@ -1277,7 +1343,7 @@ def main():
             batch_size=args.batch_size, flow_gate=args.flow_gate,
             max_funcs=args.max_functions, allow_keys=gate_keys,
             prompt_file='detect_extract_v5.md' if 'X2' in rules else 'detect_extract.md',
-            entry_seeds=llm_seeds if 'X2' in rules else None,
+            entry_seeds=llm_seeds if 'X2' in rules else None, strict_ids=enhanced,
         )
     funnel['total'] = len(ast_result.get('functions') or [])
     # v5.1: R5 second pass — sibling handlers compared with LLM-observed authorization checks too
@@ -1319,7 +1385,7 @@ def main():
                               ext_checks_by_func=validator_contract.callee_checks(
                                   ast_result.get('param_flows') or [], param_taint.load_modules(target_dir),
                                   name_dispatch=not args.no_name_dispatch) if 'X3' in rules else None,
-                              x4_facts_by_func=x4_facts if 'X4' in rules else None)
+                              x4_facts_by_func=x4_facts if 'X4' in rules else None, retain_protection=enhanced)
     print(f"  Decision: {len(findings)} finding(s) from local span rules")
 
     # CVSS scoring: metrics derived from AST facts + category defaults (no LLM input)
@@ -1337,7 +1403,7 @@ def main():
     # start line to bound-check them against the right range.
     start_line_by_func = {f"{file}:{name}": ln for (file, name), ln in line_map.items()}
     enrich_findings_with_confidence(findings, df_by_func, source_by_func, vuln_db,
-                                    start_line_by_func, no_kb=args.no_kb)
+                                    start_line_by_func)
     if findings:
         lvl_counts = defaultdict(int)
         for f in findings:
@@ -1347,6 +1413,17 @@ def main():
 
     # Filter by confidence threshold
     filtered = [f for f in findings if f.get('confidence', 0) >= args.confidence_threshold]
+
+    enhanced_result = None
+    if enhanced:
+        # Keep all raw candidates, including those below legacy score thresholds.
+        enhanced_result = ed.run(target_dir, source_index, ast_result, findings, r2_facts,
+            lambda prompt, payload: call_llm(cfg, prompt, payload, retries=3, max_tokens=8192),
+            stopped=lambda: interrupted, context=_ENHANCED_CONTEXT,
+            max_model_calls=args.enhanced_max_model_calls)
+        if funnel.get('extraction_failures'):
+            enhanced_result['status'] = 'partial'
+        filtered = enhanced_result['findings']
 
     # Generate report
     total_elapsed = time.time() - overall_start
@@ -1361,10 +1438,8 @@ def main():
             'total_templates_matched': len(candidate_templates),
             'total_duration': round(total_elapsed, 1),
             'cvss': {'version': '3.1', 'severity_source': 'computed'},
-            'confidence': {'model': ('evidence-weighted-v1-nokb-normalized' if args.no_kb
-                                     else 'evidence-weighted-v1'),
-                           'dimensions': ['code_evidence', 'ast_corroboration'] +
-                                         ([] if args.no_kb else ['template_support'])},
+            'confidence': {'model': 'evidence-weighted-v1',
+                           'dimensions': ['code_evidence', 'ast_corroboration', 'template_support']},
             'llm_role': 'semantic_extraction',
             'decision_engine': 'local_rules_v1',
             'llm_usage': dict(LLM_USAGE),
@@ -1372,7 +1447,6 @@ def main():
                 'max_functions': args.max_functions,
                 'flow_gate': args.flow_gate,
                 'source_only_findings': args.source_only_findings,
-                'no_kb': args.no_kb,
                 **({'rules': list(rules)} if rules != ('v2',) else {}),
                 **({'r2_max_hops': args.r2_max_hops, 'r2_name_dispatch': not args.no_name_dispatch}
                    if ('R2' in rules or 'R3' in rules or 'R4' in rules) else {}),
@@ -1391,8 +1465,8 @@ def main():
             'by_category': _count_by(filtered, 'missing_step_category'),
             **({'by_rule': _count_by(filtered, 'rule_id')} if rules != ('v2',) else {}),
             'score_summary': {
-                'max': max((f['cvss_score'] for f in filtered), default=0.0),
-                'mean': round(sum(f['cvss_score'] for f in filtered) / len(filtered), 1) if filtered else 0.0,
+                'max': max((f.get('cvss_score') or 0 for f in filtered), default=0.0),
+                'mean': round(sum(f.get('cvss_score') or 0 for f in filtered) / len(filtered), 1) if filtered else 0.0,
             },
         },
         'findings': filtered,
@@ -1403,20 +1477,45 @@ def main():
         ],
     }
 
+    if enhanced_result is not None:
+        report['schema_version'] = 'goforret.enhanced/v1'
+        report['enhanced'] = {k: v for k, v in enhanced_result.items() if k != 'findings'}
+        report['scan_info']['detection_mode'] = 'enhanced'
+        report['summary']['by_validation_status'] = _count_by(filtered, 'validation_status')
+        report['summary']['detected_candidates'] = len(enhanced_result['triage_queue'])
+        report['summary']['needs_review'] = sum(
+            item['triage_state'] == 'needs_review' for item in enhanced_result['triage_queue'])
+        report['summary']['score_summary'] = {'scored_findings': sum(f.get('cvss_score') is not None for f in filtered)}
     with open(report_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
     print(f"\n{'=' * 50}")
     print(f"{'Interrupted!' if interrupted else 'Done.'} Time: {total_elapsed:.1f}s")
-    print(f"  Functions analyzed: {analyzed_count}")
+    if enhanced_result is not None:
+        done = sum(t['status'] == 'completed' for t in enhanced_result['tasks'])
+        print(f"  Enhanced discovery: {done}/{len(enhanced_result['tasks'])} source units completed "
+              f"({enhanced_result['status']})")
+        print(f"  Structural-channel fact extractions: {analyzed_count}")
+    else:
+        print(f"  Functions analyzed: {analyzed_count}")
     print(f"  LLM usage: {LLM_USAGE['calls']} calls, "
           f"{LLM_USAGE['prompt_tokens']:,} prompt tokens, "
           f"{LLM_USAGE['completion_tokens']:,} completion tokens")
-    print(f"  Findings: {len(filtered)} (threshold: {args.confidence_threshold})")
-    for f in filtered:
-        print(f"    [{f.get('severity', '?').upper()} {f.get('cvss_score', 0):.1f}] {f.get('function', '?')}: "
-              f"{f.get('pattern_name', '?')} (confidence: {f.get('confidence', 0):.2f}/{f.get('confidence_level', '?')}) "
-              f"{f.get('cvss_vector', '')}")
+    print(f"  Findings: {len(filtered)}" + (" (source-supported + review-needed candidates)" if enhanced
+          else f" (threshold: {args.confidence_threshold})"))
+    if enhanced_result is not None:
+        print(f"  Review queue: {sum(i['triage_state'] == 'needs_review' for i in enhanced_result['triage_queue'])}"
+              " candidates need investigation; details in enhanced.triage_queue")
+        for item in enhanced_result['triage_queue']:
+            loc = item['location']
+            print(f"    [{item['triage_state']}] {loc['file']}:{loc['line']}: {item['title']}")
+            if item['triage_state'] == 'needs_review':
+                print(f"      reason: {str(item['reason'])[:240]}")
+    else:
+        for f in sorted(filtered, key=lambda x: x.get('validation_status', '')):
+            print(f"    [{f.get('severity', '?').upper()} {f.get('cvss_score', 0):.1f}] {f.get('function', '?')}: "
+                  f"{f.get('pattern_name', '?')} (confidence: {f.get('confidence', 0):.2f}/{f.get('confidence_level', '?')}) "
+                  f"{f.get('cvss_vector', '')}")
     print(f"\nProject: {project_dir}")
     print(f"Report: {os.path.abspath(report_path)}")
 

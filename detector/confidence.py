@@ -302,13 +302,8 @@ def score_ast_corroboration_x4(finding):
 
 
 def compute_confidence(finding, data_flow=None, source=None, vuln_db=None,
-                       start_line=1, no_kb=False):
-    """Full weighted scoring. Returns (confidence, breakdown).
-
-    no_kb=True removes the template_support dimension entirely and renormalizes
-    the remaining two dimensions over their joint weight (0.45+0.35=0.80), the
-    ablation mode used by `detect_vulns.py --no-kb`.
-    """
+                       start_line=1):
+    """Full weighted scoring. Returns (confidence, breakdown)."""
     dims = {
         'code_evidence': score_code_evidence(finding.get('evidence'), source, start_line),
         'ast_corroboration': (score_ast_corroboration_r1(finding, data_flow) if finding.get('rule_id') == 'R1'
@@ -318,35 +313,27 @@ def compute_confidence(finding, data_flow=None, source=None, vuln_db=None,
                               else score_ast_corroboration_x4(finding) if finding.get('rule_id') == 'X4'
                               else score_ast_corroboration(finding.get('missing_step_category'), data_flow)),
     }
-    if no_kb:
-        dims['template_support'] = (None, 'removed_no_kb',
-                                    'template dimension removed (--no-kb); '
-                                    'remaining dimensions renormalized over 0.80')
-    else:
-        dims['template_support'] = score_template_support(finding, vuln_db)
+    dims['template_support'] = score_template_support(finding, vuln_db)
     breakdown = {}
     total = 0.0
-    norm = 0.80 if no_kb else 1.0
     for name, (score, prov, detail) in dims.items():
         weight = WEIGHTS[name] if score is not None else 0.0
         breakdown[name] = {'score': score, 'weight': weight,
                            'provenance': prov, 'detail': detail}
         if score is not None:
             total += weight * score
-    return round(min(1.0, max(0.0, total / norm)), 3), breakdown
+    return round(min(1.0, max(0.0, total)), 3), breakdown
 
 
 def enrich_findings_with_confidence(findings, data_flow_by_func=None,
                                     source_by_func=None, vuln_db=None,
-                                    start_line_by_func=None, no_kb=False):
+                                    start_line_by_func=None):
     """Attach confidence/confidence_breakdown/confidence_level to each finding, in place.
 
     `start_line_by_func` maps "file:function" to the function's first line in
     its file, so absolute `L<line>` evidence refs verify against the right
     range. Omitting it falls back to 1 (snippet-relative).
 
-    no_kb=True: template_support dimension removed, remaining dimensions
-    renormalized (see compute_confidence).
     """
     data_flow_by_func = data_flow_by_func or {}
     source_by_func = source_by_func or {}
@@ -358,8 +345,7 @@ def enrich_findings_with_confidence(findings, data_flow_by_func=None,
             data_flow=data_flow_by_func.get(key),
             source=source_by_func.get(key),
             vuln_db=vuln_db,
-            start_line=start_line_by_func.get(key, 1),
-            no_kb=no_kb)
+            start_line=start_line_by_func.get(key, 1))
         f['confidence'] = conf
         f['confidence_breakdown'] = breakdown
         f['confidence_level'] = confidence_level(conf)
@@ -504,27 +490,6 @@ def _selftest():
     if conf != expected or confidence_level(conf) != 'likely':
         failures.append(f'aggregation neutral: got {conf} (expected {expected}), level {confidence_level(conf)}')
 
-    # no_kb normalization: template dimension removed, renormalized over 0.80
-    conf, bd = compute_confidence(
-        {'evidence': 'L10 http_request → L40 string_format，跨度内无 output_encoding 检查',
-         'template_id': '', 'pattern_name': 'output_encoding_via_string_format',
-         'missing_step_category': 'output_encoding'},
-        data_flow=df, source=source50, vuln_db=None, no_kb=True)
-    expected = round((0.45 * 1.0 + 0.35 * 1.0) / 0.80, 3)
-    if conf != expected or confidence_level(conf) != 'confirmed':
-        failures.append(f'no_kb aggregation: got {conf} (expected {expected})')
-    if bd['template_support']['provenance'] != 'removed_no_kb' or bd['template_support']['score'] is not None:
-        failures.append(f"no_kb template dim wrong: {bd['template_support']}")
-    if bd['template_support']['weight'] != 0.0:
-        failures.append(f"no_kb template weight not zero: {bd['template_support']['weight']}")
-    conf2, _ = compute_confidence(
-        {'evidence': 'missing check', 'template_id': '',
-         'missing_step_category': 'error_handling'},
-        data_flow=None, source=None, vuln_db=None, no_kb=True)
-    expected2 = round((0.45 * 0.5 + 0.35 * 0.5) / 0.80, 3)
-    if conf2 != expected2 or confidence_level(conf2) != 'likely':
-        failures.append(f'no_kb neutral: got {conf2} (expected {expected2})')
-
     # enrich attaches computed fields
     fs = [{'function': 'a.go:f', 'evidence': 'L1 x → L2 y', 'template_id': 't',
            'missing_step_category': 'input_sanitization'}]
@@ -546,7 +511,7 @@ def _selftest():
             print(f"  - {msg}")
         return 1
     print("SELFTEST PASSED: 9 code_evidence (incl. 3 line-ref), 13 ast_corroboration (incl. 6 sanitizer span), "
-          "5 template_support, 3 aggregations, 2 no_kb normalization, 2 enrich, weights")
+          "5 template_support, 3 aggregations, 2 enrich, weights")
     return 0
 
 

@@ -348,7 +348,7 @@ def propagate(param_flows, modules=None, max_hops=MAX_HOPS, name_dispatch=True, 
     return tainted, idx
 
 
-def tainted_sinks(param_flows, modules=None, max_hops=MAX_HOPS, name_dispatch=True, wire_types=None, extra_seeds=None):
+def tainted_sinks(param_flows, modules=None, max_hops=MAX_HOPS, name_dispatch=True, wire_types=None, extra_seeds=None, retain_protection=False):
     """-> {func_key: [ {sink, source} ]} sinks reached by externally originated data.
 
     source: {line, type: 'param_external', provenance, param, path}. The source line is
@@ -364,7 +364,7 @@ def tainted_sinks(param_flows, modules=None, max_hops=MAX_HOPS, name_dispatch=Tr
         for snk in pf.get('taint_sinks') or []:
             roots = list(snk.get('roots') or [])
             if snk.get('type') == 'unbounded_read':
-                if 'lim' in roots:
+                if 'lim' in roots and not retain_protection:
                     continue  # read through io.LimitReader / http.MaxBytesReader
                 if 'body' in roots and 'decomp' in roots:
                     roots.append('src')  # decompressed HTTP body: decompression bomb (CWE-409)

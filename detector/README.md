@@ -8,7 +8,7 @@
 
 - 扫描本地 Go 项目，或按 Git URL/分支/标签拉取后扫描。
 - 使用 Go AST 分析输入源、危险汇、净化操作、跨函数参数传播和授权一致性。
-- 让 LLM 只提取带行号的语义事实，由本地规则决定是否形成 finding。
+- 默认模式让 LLM 提取带行号的语义事实，由本地规则决定是否形成 finding；增强模式另加全仓语义发现与独立证据核验。
 - 本地确定性计算 CVSS v3.1 和证据加权置信度。
 - 生成结构化 `report.json`，并可进一步生成单元测试与 PoC 验证脚本。
 - 提供从 Go 漏洞数据抓取、补丁解析、行为链提取到知识库构建的完整数据流水线。
@@ -84,15 +84,6 @@ python3 detect_vulns.py \
   --flow-gate
 ```
 
-实验用的无知识库模式：
-
-```bash
-python3 detect_vulns.py \
-  --target /path/to/go-project \
-  --no-kb \
-  --workers 4
-```
-
 默认结果写入 `projects/<timestamp>/report.json`。LLM 调用会产生费用；首次运行建议限制目标规模，并检查 `report.json` 中的 `scan_info.llm_usage`。
 
 ## 验证
@@ -139,3 +130,37 @@ go test ./...
 ## 许可证
 
 当前仓库尚未添加开源许可证。在选择许可证前，默认保留全部权利。
+
+## 增强检测模式
+
+借鉴 OCR 的上下文工具与独立核验机制，在现有规则之外增加全仓分层语义发现：
+
+```bash
+python3 detect_vulns.py --target /path/to/go-project --detection-mode enhanced
+```
+
+增强模式可用 `--enhanced-max-model-calls N` 限制新增的全仓发现与候选核验请求数；默认 `0` 不限制。此上限不包含先运行的原有结构化检测通道。达到上限时，未检查的源码单元标为 `pending`，未完成核验的候选保留为 `unknown`，报告 `enhanced.status` 为 `partial`，并在 `enhanced.limits` 记录已用请求数。调用数上限不是 token 或费用硬上限。
+
+默认仍为 `legacy`。增强模式会检查全部生产 Go 文件中的函数、闭包和声明；`--flow-gate`、`--max-functions` 与 `--align-max-funcs` 仅约束原有通道，不限制新增发现通道。文件按 AST 边界及大小拆分，模型可按需查询源码、调用关系和污点路径。每个发现单元及每个候选各最多六轮请求，每轮最多三个只读查询；没有候选数量截断，因此大仓库调用成本可能明显增加。
+
+每个源码单元至多先推进一个新调查组的一轮核验；完成发现后，各组代表候选轮流调查，再处理组内其他候选。分组依据是函数、危险位置和类别，只用于分配额度，组员各自保留独立结论。有限额度可能使后续单元保持 `pending`，报告分别记录发现与核验调用数，并在 `enhanced.investigation_groups` 保留分组成员。调用关系查询提供调用点、实参来源和候选目标的参数/返回值事实；字段查询可按显式类型身份寻找协议字段的构造、读取与写入，并返回局部变量的可能赋值来源。名称分派、隐式类型及分支可达性仍需核查。
+
+增强模式保留检查和清洗操作作为保护假设，通过独立核验形成 `supported`、`refuted`、`unknown`。`supported` 是源码证据支持，**不是动态复现**；失败、歧义或调查轮数耗尽均保留为不确定。报告使用 `goforret.enhanced/v1`：
+
+- `findings`：supported 与 unknown，均不受旧 confidence 阈值过滤。
+- `enhanced.triage_queue`：把两类结果列为可复核的检测候选；`needs_review` 对应 unknown，保留位置、源码引用、未决问题和核验原因。CLI 也逐项显示。它不是已复现漏洞清单。
+- `enhanced.candidates`：包含 refuted 的全部核验结果；`raw_candidates` 保留各来源原始候选。
+- `enhanced.tasks`、`source_errors`、`invalid_candidates`：发现覆盖、失败和输出协议问题；`status=partial` 表示过程不完整，`complete` 也不表示代码安全。
+- 每项保存源码引用、核验结论和查询轨迹。语义通道没有可靠数值评分时 CVSS/confidence 为 null；结构化通道旧评分仅作排序参考，不替代 validation_status。
+
+测试生成器默认仅处理增强报告中的 supported；使用 `--include-unknown` 可包含待核实项。生成文件以 finding ID 命名，避免同模式相互覆盖。
+
+增强模式首次使用会按 Go 源码内容构建临时分析器，需要 Go 1.23+。不会使用可能过期的仓库内二进制。主检测流程会加载漏洞库并检索行为链；新增语义发现通道本身不读取漏洞库或补丁。
+
+离线回归（使用安装了 requirements.txt 的 Python 环境）：
+
+```bash
+python3 -m unittest discover -s tests -p 'test_enhanced*.py' -v
+```
+
+这些测试使用真实 Go 分析器与确定性模型替身，验证候选保留、上下文查询和证据协议，不证明真实模型的精确率或召回率。机制与限制见 [增强检测说明](docs/ENHANCED_DETECTION.md)。

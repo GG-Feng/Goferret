@@ -56,7 +56,7 @@ def qualifies(pf):
 
 
 def r3_facts(param_flows, modules=None, rules=None, max_hops=param_taint.MAX_HOPS,
-             name_dispatch=True, infer_purpose=False, wire_types=None, extra_seeds=None):
+             name_dispatch=True, infer_purpose=False, wire_types=None, extra_seeds=None, retain_protection=False):
     """-> {validator_key: [fact]} with fact = {category, purpose, inferred, source, sink, callers}."""
     rules = rules or load_rules()
     sink_purpose = {}
@@ -111,7 +111,7 @@ def r3_facts(param_flows, modules=None, rules=None, max_hops=param_taint.MAX_HOP
         facts_ = vpf.get('check_facts') or []
         for pname in sorted(found):
             rule = rules[pname]
-            if any(rx.search(cf['text']) for cf in facts_ for rx in rule['_strong']):
+            if not retain_protection and any(rx.search(cf['text']) for cf in facts_ for rx in rule['_strong']):
                 continue
             weak = next((cf for cf in sorted(facts_, key=lambda c: c['line'])
                          if any(rx.search(cf['text']) for rx in rule['_weak'])), None)
